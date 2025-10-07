@@ -1,0 +1,59 @@
+# Build optimization - exclude unnecessary files from Docker context
+
+# Git
+.git
+.gitignore
+.github
+
+# Documentation
+*.md
+README.md
+TODO.md
+AGENTS.md
+CLAUDE.md
+DIRECTORY_STRUCTURE.md
+docs/
+
+# Development files
+.env
+.env.local
+.env.development
+*.log
+server.log
+
+# Build artifacts
+bin/
+server
+main
+
+# Development and testing
+test/
+*_test.go
+**/*_test.go
+
+# Temporary files
+tmp/
+temp/
+.tmp
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Dependencies (will be downloaded in container)
+vendor/
+
+# Development Docker files
+deployments/docker/Dockerfile.dev
+deployments/docker/docker-compose.yml
+
+# Local development tools
+air.toml
+.air.toml
