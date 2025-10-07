@@ -58,3 +58,4 @@ pids
 # Temporary folders
 tmp/
 temp/
+deployments/.env

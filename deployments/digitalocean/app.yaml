@@ -12,8 +12,7 @@ services:
       repo: techjusticelab/Motion-Index
       branch: main
       deploy_on_push: true
-    build_command: go mod download
-    run_command: go run cmd/server/main.go
+    dockerfile_path: Dockerfile
     
     # Container configuration
     instance_count: 1
@@ -145,4 +144,3 @@ services:
         value: "false"  # Disable in production for security
       - key: ENABLE_STACK_TRACE
         value: "false"   # Disable in production for security
-
