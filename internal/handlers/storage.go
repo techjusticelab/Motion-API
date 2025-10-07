@@ -164,17 +164,22 @@ func (h *StorageHandler) ServeDocument(c *fiber.Ctx) error {
 		})
 	}
 
-	if !exists {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "Document not found",
-			"path":  documentPath,
-			"suggestion": "Verify the document exists in storage and the path is correct",
-			"available_endpoints": []string{
-				"/api/v1/files/search?name=filename - Search for documents by name",
-				"/api/v1/storage/documents - List all documents",
-			},
-		})
-	}
+    if !exists {
+        // Fallback: try to recover the correct path by searching Spaces using ID/filename parts
+        if recoveredPath, ok := h.resolveDocumentPathBySearch(ctx, documentPath); ok {
+            documentPath = recoveredPath
+        } else {
+            return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+                "error": "Document not found",
+                "path":  documentPath,
+                "suggestion": "Verify the document exists in storage and the path is correct",
+                "available_endpoints": []string{
+                    "/api/v1/files/search?name=filename - Search for documents by name",
+                    "/api/v1/storage/documents - List all documents",
+                },
+            })
+        }
+    }
 
 	// Parse query parameters for URL type and expiration
 	useSignedURL := c.Query("signed", "true") == "true"
@@ -237,6 +242,77 @@ func (h *StorageHandler) ServeDocument(c *fiber.Ctx) error {
 
 	// Redirect to CDN URL
 	return c.Redirect(documentURL, fiber.StatusFound)
+}
+
+// resolveDocumentPathBySearch attempts to recover the correct storage key when the exact path is unknown.
+// Strategy:
+// - Parse the requested basename into potential (docID prefix, filename) parts
+// - Use List with narrow prefixes (documents/<docID>, documents/<filename>, documents/<filename-without-ext>)
+// - Prefer exact basename match; otherwise return the first reasonable candidate
+func (h *StorageHandler) resolveDocumentPathBySearch(ctx context.Context, requestedPath string) (string, bool) {
+    // Ensure prefix for consistency
+    path := requestedPath
+    if !strings.HasPrefix(path, "documents/") {
+        path = "documents/" + path
+    }
+
+    base := filepath.Base(path)
+    if base == "" || base == "documents" {
+        return "", false
+    }
+
+    // Build candidate prefixes
+    var prefixes []string
+    parts := strings.Split(base, "_")
+    if len(parts) >= 3 && strings.HasPrefix(parts[0], "doc") {
+        // Example: doc_1759855215756364200_2015-Dependency-...pdf
+        docIDPrefix := strings.Join(parts[0:2], "_") // doc_<number>
+        name := strings.Join(parts[2:], "_")         // 2015-Dependency-...pdf
+        nameNoExt := strings.TrimSuffix(name, filepath.Ext(name))
+
+        prefixes = append(prefixes,
+            "documents/"+docIDPrefix,
+            "documents/"+name,
+        )
+        if nameNoExt != "" {
+            prefixes = append(prefixes, "documents/"+nameNoExt)
+        }
+    } else {
+        // Fall back to filename-based prefixes
+        name := base
+        nameNoExt := strings.TrimSuffix(name, filepath.Ext(name))
+        prefixes = append(prefixes, "documents/"+name)
+        if nameNoExt != "" {
+            prefixes = append(prefixes, "documents/"+nameNoExt)
+        }
+    }
+
+    // Try each prefix and pick the best candidate
+    for _, p := range prefixes {
+        objects, err := h.storage.List(ctx, p)
+        if err != nil || len(objects) == 0 {
+            continue
+        }
+
+        // 1) Exact basename match wins
+        for _, obj := range objects {
+            if strings.EqualFold(filepath.Base(obj.Path), base) {
+                return obj.Path, true
+            }
+        }
+        // 2) Any object containing the basename
+        for _, obj := range objects {
+            if strings.Contains(strings.ToLower(obj.Path), strings.ToLower(base)) {
+                return obj.Path, true
+            }
+        }
+        // 3) Single object under the prefix is a reasonable guess
+        if len(objects) == 1 {
+            return objects[0].Path, true
+        }
+    }
+
+    return "", false
 }
 
 // filterDocuments applies file type and size filters to the document list
