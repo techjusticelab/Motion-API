@@ -86,21 +86,7 @@ services:
       - key: DO_OPENSEARCH_INDEX
         value: "documents"
 
-      # Also set generic OPENSEARCH_* for internal config validation
-      - key: OPENSEARCH_HOST
-        value: "${OPENSEARCH_HOST}"
-        type: SECRET
-      - key: OPENSEARCH_PORT
-        value: "25060"
-      - key: OPENSEARCH_USERNAME
-        value: "${OPENSEARCH_USERNAME}"
-      - key: OPENSEARCH_PASSWORD
-        value: "${OPENSEARCH_PASSWORD}"
-        type: SECRET
-      - key: OPENSEARCH_USE_SSL
-        value: "true"
-      - key: OPENSEARCH_INDEX
-        value: "documents"
+      # Prefer using only DO_OPENSEARCH_* to avoid conflicting values
       
       # Supabase Authentication
       - key: SUPABASE_URL

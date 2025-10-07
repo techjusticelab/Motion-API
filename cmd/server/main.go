@@ -1,13 +1,14 @@
 package main
 
 import (
-	"context"
-	"fmt"
-	"log"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
+    "context"
+    "fmt"
+    "log"
+    "os"
+    "strings"
+    "os/signal"
+    "syscall"
+    "time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -21,10 +22,12 @@ import (
 )
 
 func main() {
-	// Load .env file (ignore error if file doesn't exist in production)
-	if err := godotenv.Load(); err != nil {
-		log.Printf("Warning: .env file not found or could not be loaded: %v", err)
-	}
+    // Load .env only for local development or when file exists
+    if strings.EqualFold(os.Getenv("ENVIRONMENT"), "local") {
+        _ = godotenv.Load()
+    } else if _, statErr := os.Stat(".env"); statErr == nil {
+        _ = godotenv.Load()
+    }
 
 	// Load configuration
 	cfg, err := config.Load()
