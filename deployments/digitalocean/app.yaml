@@ -12,7 +12,8 @@ services:
       repo: techjusticelab/Motion-Index
       branch: main
       deploy_on_push: true
-    dockerfile_path: Dockerfile
+    build_command: go mod download
+    run_command: go run cmd/server/main.go
     
     # Container configuration
     instance_count: 1
@@ -50,14 +51,17 @@ services:
       - key: PRODUCTION
         value: "true"
       - key: ALLOWED_ORIGINS
-        value: "https://motion-index.ondigitalocean.app,https://motion-index-fiber.ondigitalocean.app"
+        value: "https://motionindex.techjusticelab.org,https://api.motionindex.techjusticelab.org,http://localhost:5173"
       
       # DigitalOcean Spaces (replace with your actual values)
-      - key: DO_SPACES_KEY
-        value: "${DO_SPACES_KEY}"
+      - key: DO_API_TOKEN
+        value: "${DO_API_TOKEN}"
         type: SECRET
-      - key: DO_SPACES_SECRET
-        value: "${DO_SPACES_SECRET}"
+      - key: DO_SPACES_ACCESS_KEY
+        value: "${DO_SPACES_ACCESS_KEY}"
+        type: SECRET
+      - key: DO_SPACES_SECRET_KEY
+        value: "${DO_SPACES_SECRET_KEY}"
         type: SECRET
       - key: DO_SPACES_BUCKET
         value: "motion-index-docs"
@@ -67,19 +71,36 @@ services:
         value: ""
       
       # OpenSearch/Elasticsearch Configuration
-      - key: ES_HOST
-        value: "${ES_HOST}"
+      # OpenSearch (DigitalOcean) — prefer DO_* names used by config loader
+      - key: DO_OPENSEARCH_HOST
+        value: "${DO_OPENSEARCH_HOST}"
         type: SECRET
-      - key: ES_PORT
+      - key: DO_OPENSEARCH_PORT
         value: "25060"
-      - key: ES_USERNAME
-        value: "doadmin"
-      - key: ES_PASSWORD
-        value: "${ES_PASSWORD}"
+      - key: DO_OPENSEARCH_USERNAME
+        value: "${DO_OPENSEARCH_USERNAME}"
+      - key: DO_OPENSEARCH_PASSWORD
+        value: "${DO_OPENSEARCH_PASSWORD}"
         type: SECRET
-      - key: ES_USE_SSL
+      - key: DO_OPENSEARCH_USE_SSL
         value: "true"
-      - key: ES_INDEX
+      - key: DO_OPENSEARCH_INDEX
+        value: "documents"
+
+      # Also set generic OPENSEARCH_* for internal config validation
+      - key: OPENSEARCH_HOST
+        value: "${OPENSEARCH_HOST}"
+        type: SECRET
+      - key: OPENSEARCH_PORT
+        value: "25060"
+      - key: OPENSEARCH_USERNAME
+        value: "${OPENSEARCH_USERNAME}"
+      - key: OPENSEARCH_PASSWORD
+        value: "${OPENSEARCH_PASSWORD}"
+        type: SECRET
+      - key: OPENSEARCH_USE_SSL
+        value: "true"
+      - key: OPENSEARCH_INDEX
         value: "documents"
       
       # Supabase Authentication
@@ -125,17 +146,3 @@ services:
       - key: ENABLE_STACK_TRACE
         value: "false"   # Disable in production for security
 
-# Optional: Static site for documentation (if needed)
-static_sites:
-  - name: docs
-    source_dir: /docs
-    github:
-      repo: techjusticelab/Motion-Index
-      branch: main
-      deploy_on_push: true
-    build_command: echo "Documentation site"
-    output_dir: /docs
-    index_document: index.html
-    error_document: 404.html
-    routes:
-      - path: /docs

@@ -52,13 +52,13 @@ func main() {
 	// Completely disable helmet for now to allow unrestricted access
 	// app.Use(helmet.New(helmet.Config{...}))
 	
-	app.Use(cors.New(cors.Config{
-		AllowOrigins:     "https://motionindex.techjusticelab.org,http://localhost:5173",
-		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS,PATCH",
-		AllowHeaders:     "*",
-		AllowCredentials: true,
-		ExposeHeaders:    "Content-Length,Content-Type,X-Total-Count",
-	}))
+    app.Use(cors.New(cors.Config{
+        AllowOrigins:     cfg.Server.AllowedOrigins,
+        AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS,PATCH",
+        AllowHeaders:     "*",
+        AllowCredentials: true,
+        ExposeHeaders:    "Content-Length,Content-Type,X-Total-Count",
+    }))
 
 	// Initialize handlers
 	h, err := handlers.New(cfg)

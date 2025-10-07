@@ -36,8 +36,8 @@ docker-compose -f deployments/docker/docker-compose.yml --profile with-redis --p
 ```
 
 ### 4. Access Services
-- **API**: http://localhost:6000
-- **Health Check**: http://localhost:6000/health
+- **API**: http://localhost:8003
+- **Health Check**: http://localhost:8003/health
 - **OpenAPI Docs**: http://localhost:6000/docs (if enabled)
 - **Redis** (optional): localhost:6379
 - **OpenSearch** (optional): http://localhost:9200
@@ -100,7 +100,7 @@ OPENAI_MODEL=gpt-4
 ### Development-Specific Settings
 ```bash
 # Server Configuration
-PORT=6000
+PORT=8003
 ENVIRONMENT=local
 PRODUCTION=false
 ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173,http://localhost:5174
@@ -168,7 +168,7 @@ docker-compose -f deployments/docker/docker-compose.yml exec motion-index-api go
 docker build -t motion-index-fiber:latest .
 
 # Test production build
-docker run -p 8080:8080 --env-file .env.production motion-index-fiber:latest
+docker run -p 8003:8003 --env-file .env.production motion-index-fiber:latest
 ```
 
 ### Database Operations

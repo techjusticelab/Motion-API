@@ -374,13 +374,13 @@ Configure in App Platform dashboard or via API:
 ### Docker Deployment
 
 ```bash
-# Build production image
-docker build -f deployments/docker/Dockerfile.prod -t motion-index-fiber:latest .
+# Build image
+docker build -f deployments/docker/Dockerfile -t motion-index-fiber:latest .
 
 # Run with production configuration
 docker run -d \
   --name motion-index \
-  -p 6000:6000 \
+  -p 8003:8003 \
   --env-file .env.production \
   --restart unless-stopped \
   motion-index-fiber:latest

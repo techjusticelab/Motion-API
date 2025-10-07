@@ -91,12 +91,13 @@ func New(cfg *config.Config) (*Handlers, error) {
 	}
 
 	// Create indexing processor
-	indexingProcessorConfig := &processing.IndexingProcessorConfig{
-		APIBaseURL:     "http://localhost:6000", // TODO: Make this configurable
-		RequestTimeout: 30 * time.Second,
-		MaxRetries:     3,
-		RetryDelay:     5 * time.Second,
-	}
+    // Use local loopback with configured port so it works in all environments
+    indexingProcessorConfig := &processing.IndexingProcessorConfig{
+        APIBaseURL:     fmt.Sprintf("http://localhost:%s", cfg.Server.Port),
+        RequestTimeout: 30 * time.Second,
+        MaxRetries:     3,
+        RetryDelay:     5 * time.Second,
+    }
 	indexingProcessor := processing.NewIndexingProcessor(indexingProcessorConfig)
 
 	// Create the indexing queue
@@ -255,4 +256,3 @@ func createClassificationService(cfg *config.Config) (classifier.Service, error)
 
 	return classifier.NewService(classifierConfig)
 }
-

@@ -129,7 +129,17 @@ func Load() (*Config, error) {
 	}
 
 	// Parse numeric values with error handling
-	opensearchPort, err := parseEnvInt("OPENSEARCH_PORT", getEnvInt("ES_PORT", 9200))
+    // Determine OpenSearch port with broad env fallback (OPENSEARCH_*, DO_OPENSEARCH_*, ES_*)
+    opensearchPort, err := parseEnvInt("OPENSEARCH_PORT", getEnvInt("ES_PORT", 9200))
+    if os.Getenv("OPENSEARCH_PORT") == "" && os.Getenv("ES_PORT") == "" {
+        if v := os.Getenv("DO_OPENSEARCH_PORT"); v != "" {
+            if p, pErr := strconv.Atoi(v); pErr == nil {
+                opensearchPort = p
+            } else {
+                return nil, fmt.Errorf("DO_OPENSEARCH_PORT must be a valid number")
+            }
+        }
+    }
 	if err != nil {
 		return nil, err
 	}
@@ -175,14 +185,14 @@ func Load() (*Config, error) {
 			Database: getEnv("DB_DATABASE", "motion_index"),
 			UseSSL:   getEnvBool("DB_USE_SSL", false),
 		},
-		Storage: StorageConfig{
-			Backend:   getEnv("STORAGE_BACKEND", "local"),
-			AccessKey: getEnv("STORAGE_ACCESS_KEY", getEnv("DO_SPACES_KEY", "")),
-			SecretKey: getEnv("STORAGE_SECRET_KEY", getEnv("DO_SPACES_SECRET", "")),
-			Bucket:    getEnv("STORAGE_BUCKET", getEnv("DO_SPACES_BUCKET", "motion-index-docs")),
-			Region:    getEnv("STORAGE_REGION", getEnv("DO_SPACES_REGION", "nyc3")),
-			CDNDomain: getEnv("STORAGE_CDN_DOMAIN", getEnv("DO_SPACES_CDN_DOMAIN", "")),
-		},
+        Storage: StorageConfig{
+            Backend:   getEnv("STORAGE_BACKEND", "local"),
+            AccessKey: getEnv("STORAGE_ACCESS_KEY", getEnv("DO_SPACES_ACCESS_KEY", getEnv("DO_SPACES_KEY", ""))),
+            SecretKey: getEnv("STORAGE_SECRET_KEY", getEnv("DO_SPACES_SECRET_KEY", getEnv("DO_SPACES_SECRET", ""))),
+            Bucket:    getEnv("STORAGE_BUCKET", getEnv("DO_SPACES_BUCKET", "motion-index-docs")),
+            Region:    getEnv("STORAGE_REGION", getEnv("DO_SPACES_REGION", "nyc3")),
+            CDNDomain: getEnv("STORAGE_CDN_DOMAIN", getEnv("DO_SPACES_CDN_DOMAIN", "")),
+        },
 		Auth: AuthConfig{
 			JWTSecret:       getEnv("JWT_SECRET", ""),
 			SupabaseURL:     getEnv("SUPABASE_URL", ""),
@@ -195,14 +205,14 @@ func Load() (*Config, error) {
 			BatchSize:      batchSize,
 			ProcessTimeout: processTimeout,
 		},
-		OpenSearch: OpenSearchConfig{
-			Host:     getEnv("OPENSEARCH_HOST", getEnv("ES_HOST", "")), // Don't use default to allow validation
-			Port:     opensearchPort,
-			Username: getEnv("OPENSEARCH_USERNAME", getEnv("ES_USERNAME", "")),
-			Password: getEnv("OPENSEARCH_PASSWORD", getEnv("ES_PASSWORD", "")),
-			UseSSL:   getEnvBool("OPENSEARCH_USE_SSL", getEnvBool("ES_USE_SSL", environment != "local")),
-			Index:    getEnv("OPENSEARCH_INDEX", getEnv("ES_INDEX", "documents")),
-		},
+        OpenSearch: OpenSearchConfig{
+            Host:     getEnv("OPENSEARCH_HOST", getEnv("ES_HOST", getEnv("DO_OPENSEARCH_HOST", ""))), // Prefer OPENSEARCH_*, then ES_*, then DO_OPENSEARCH_*
+            Port:     opensearchPort,
+            Username: getEnv("OPENSEARCH_USERNAME", getEnv("ES_USERNAME", getEnv("DO_OPENSEARCH_USERNAME", ""))),
+            Password: getEnv("OPENSEARCH_PASSWORD", getEnv("ES_PASSWORD", getEnv("DO_OPENSEARCH_PASSWORD", ""))),
+            UseSSL:   getEnvBool("OPENSEARCH_USE_SSL", getEnvBool("ES_USE_SSL", getEnvBool("DO_OPENSEARCH_USE_SSL", environment != "local"))),
+            Index:    getEnv("OPENSEARCH_INDEX", getEnv("ES_INDEX", getEnv("DO_OPENSEARCH_INDEX", "documents"))),
+        },
 		OpenAI: OpenAIConfig{
 			APIKey: getEnv("OPENAI_API_KEY", ""),
 			Model:  getEnv("OPENAI_MODEL", "gpt-4"),
