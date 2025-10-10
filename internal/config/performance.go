@@ -49,6 +49,9 @@ type PerformanceConfig struct {
 	EnableGPU           bool `json:"enable_gpu"`
 	GPUMemoryLimitMB    int  `json:"gpu_memory_limit_mb"`
 	GPUBatchSize        int  `json:"gpu_batch_size"`
+	
+	// PDF processing limits
+	MaxPDFPages         int  `json:"max_pdf_pages"`
 }
 
 // HardwareInfo contains detected hardware information
@@ -119,6 +122,9 @@ func OptimizeForHardware(hardware *HardwareInfo) *PerformanceConfig {
 		EnableGPU:        hardware.HasNVIDIAGPU,
 		GPUMemoryLimitMB: hardware.GPUMemoryMB / 2, // Use half of GPU memory
 		GPUBatchSize:     32,
+		
+		// PDF processing limits
+		MaxPDFPages:      25, // Limit to 25 pages to prevent memory exhaustion
 	}
 	
 	// Calculate optimal worker counts based on hardware

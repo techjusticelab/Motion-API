@@ -7,6 +7,8 @@ import (
 	"io"
 	"log"
 	"regexp"
+	"runtime"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -22,7 +24,28 @@ func NewPDFExtractor() Extractor {
 }
 
 // Extract extracts text from PDF files with fallback mechanisms
-func (e *pdfExtractor) Extract(ctx context.Context, reader io.Reader, metadata *DocumentMetadata) (*ExtractionResult, error) {
+func (e *pdfExtractor) Extract(ctx context.Context, reader io.Reader, metadata *DocumentMetadata) (result *ExtractionResult, err error) {
+	// Add panic recovery to prevent server crashes
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[PDF-EXTRACT] 💥 Panic recovered: %v", r)
+			err = NewExtractionError("pdf", fmt.Sprintf("PDF processing panic: %v", r), nil)
+			result = &ExtractionResult{
+				Text:      "",
+				WordCount: 0,
+				CharCount: 0,
+				PageCount: 0,
+				Language:  "unknown",
+				Metadata: map[string]interface{}{
+					"format":         "pdf",
+					"extraction":     "failed_panic_recovery",
+					"error":          fmt.Sprintf("panic: %v", r),
+					"pages_processed": 0,
+				},
+			}
+		}
+	}()
+	
 	// Read the PDF content
 	content, err := io.ReadAll(reader)
 	if err != nil {
@@ -66,7 +89,7 @@ func (e *pdfExtractor) Extract(ctx context.Context, reader io.Reader, metadata *
 
 	// Try primary extraction method
 	log.Printf("[PDF-EXTRACT] 🔄 Attempting primary extraction method (ledongthuc/pdf)")
-	text, pageCount, err := e.extractWithPrimaryMethod(content)
+	text, pageCount, err := e.extractWithPrimaryMethod(content, metadata)
 	if err == nil && text != "" {
 		// Success with primary method
 		log.Printf("[PDF-EXTRACT] ✅ Primary method successful: %d chars, %d pages", len(text), pageCount)
@@ -151,7 +174,7 @@ func (e *pdfExtractor) CanExtract(format string) bool {
 }
 
 // extractWithPrimaryMethod uses the original ledongthuc/pdf method
-func (e *pdfExtractor) extractWithPrimaryMethod(content []byte) (string, int, error) {
+func (e *pdfExtractor) extractWithPrimaryMethod(content []byte, metadata *DocumentMetadata) (string, int, error) {
 	// Create a reader from the content
 	contentReader := bytes.NewReader(content)
 
@@ -163,9 +186,9 @@ func (e *pdfExtractor) extractWithPrimaryMethod(content []byte) (string, int, er
 		return "", 0, err
 	}
 
-	log.Printf("[PDF-EXTRACT] ✅ PDF opened successfully, extracting text from all pages")
-	// Extract text from all pages
-	text, pageCount, err := e.extractAllText(pdfReader)
+	log.Printf("[PDF-EXTRACT] ✅ PDF opened successfully, extracting text from pages")
+	// Extract text from pages (respecting page limit)
+	text, pageCount, err := e.extractAllText(pdfReader, metadata)
 	log.Printf("[PDF-EXTRACT] 📊 Primary extraction result: %d chars, %d pages, err: %v", len(text), pageCount, err)
 	return text, pageCount, err
 }
@@ -348,12 +371,51 @@ func (e *pdfExtractor) cleanExtractedText(text string) string {
 }
 
 // extractAllText extracts text from all pages of the PDF
-func (e *pdfExtractor) extractAllText(reader *pdf.Reader) (string, int, error) {
+func (e *pdfExtractor) extractAllText(reader *pdf.Reader, metadata *DocumentMetadata) (string, int, error) {
 	var allText strings.Builder
 	pageCount := reader.NumPage()
-	log.Printf("[PDF-EXTRACT] 📖 PDF has %d pages", pageCount)
+	
+	// Get page limit from metadata properties, default to 25
+	maxPages := 25
+	if metadata != nil && metadata.Properties != nil {
+		if limitStr, exists := metadata.Properties["max_pdf_pages"]; exists {
+			if limit, err := strconv.Atoi(limitStr); err == nil && limit > 0 {
+				maxPages = limit
+			}
+		}
+	}
+	
+	// Determine actual pages to process
+	pagesToProcess := pageCount
+	limitReached := false
+	if pageCount > maxPages {
+		pagesToProcess = maxPages
+		limitReached = true
+	}
+	
+	log.Printf("[PDF-EXTRACT] 📖 PDF has %d pages, processing %d pages (limit: %d)", 
+		pageCount, pagesToProcess, maxPages)
+	
+	if limitReached {
+		log.Printf("[PDF-EXTRACT] ⚠️ Page limit reached: processing only first %d of %d pages", 
+			maxPages, pageCount)
+	}
 
-	for pageNum := 1; pageNum <= pageCount; pageNum++ {
+	for pageNum := 1; pageNum <= pagesToProcess; pageNum++ {
+		// Check memory usage every few pages to prevent crashes
+		if pageNum%5 == 0 {
+			var memStats runtime.MemStats
+			runtime.ReadMemStats(&memStats)
+			// If we're using more than 200MB for this extraction, abort
+			if memStats.Alloc > 200*1024*1024 {
+				log.Printf("[PDF-EXTRACT] ⚠️ Memory limit reached at page %d (%d MB), aborting extraction", 
+					pageNum, memStats.Alloc/(1024*1024))
+				limitReached = true
+				pagesToProcess = pageNum - 1
+				break
+			}
+		}
+		
 		page := reader.Page(pageNum)
 		if page.V.IsNull() {
 			log.Printf("[PDF-EXTRACT] ⚠️ Page %d is null, skipping", pageNum)
@@ -372,6 +434,15 @@ func (e *pdfExtractor) extractAllText(reader *pdf.Reader) (string, int, error) {
 			continue
 		}
 
+		// Check if we have excessive text accumulation
+		if allText.Len() > 10*1024*1024 { // 10MB of text is excessive
+			log.Printf("[PDF-EXTRACT] ⚠️ Text length limit reached at page %d (%d chars), aborting extraction", 
+				pageNum, allText.Len())
+			limitReached = true
+			pagesToProcess = pageNum
+			break
+		}
+
 		// Add page text with page separator
 		if allText.Len() > 0 {
 			allText.WriteString("\n\n")
@@ -380,8 +451,17 @@ func (e *pdfExtractor) extractAllText(reader *pdf.Reader) (string, int, error) {
 	}
 
 	finalText := allText.String()
-	log.Printf("[PDF-EXTRACT] 📊 Total extraction result: %d chars from %d pages", len(finalText), pageCount)
-	return finalText, pageCount, nil
+	
+	// Add metadata about page limiting
+	resultPageCount := pagesToProcess
+	if limitReached {
+		log.Printf("[PDF-EXTRACT] 📊 Limited extraction result: %d chars from %d pages (limit reached, skipped %d pages)", 
+			len(finalText), pagesToProcess, pageCount-pagesToProcess)
+	} else {
+		log.Printf("[PDF-EXTRACT] 📊 Total extraction result: %d chars from %d pages", len(finalText), pageCount)
+	}
+	
+	return finalText, resultPageCount, nil
 }
 
 // cleanText performs comprehensive text cleaning using the enhanced TextCleaner

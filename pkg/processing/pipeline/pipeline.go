@@ -39,6 +39,7 @@ type Config struct {
 	RetryAttempts  int           `json:"retry_attempts"`
 	RetryDelay     time.Duration `json:"retry_delay"`
 	EnableMetrics  bool          `json:"enable_metrics"`
+	MaxPDFPages    int           `json:"max_pdf_pages"`
 }
 
 // NewPipeline creates a new document processing pipeline
@@ -58,7 +59,7 @@ func NewPipeline(
 
 	// Create processors
 	processors := make(map[ProcessorType]Processor)
-	processors[ProcessorTypeExtraction] = NewExtractionProcessor(extractorSvc)
+	processors[ProcessorTypeExtraction] = NewExtractionProcessor(extractorSvc, config)
 	processors[ProcessorTypeClassification] = NewClassificationProcessor(classifierSvc)
 	processors[ProcessorTypeIndexing] = NewIndexingProcessor(searchSvc)
 	processors[ProcessorTypeStorage] = NewStorageProcessor(storageSvc)
@@ -474,5 +475,6 @@ func DefaultConfig() *Config {
 		RetryAttempts:  3,
 		RetryDelay:     time.Second,
 		EnableMetrics:  true,
+		MaxPDFPages:    25, // Limit PDF processing to 25 pages by default
 	}
 }

@@ -16,12 +16,14 @@ import (
 // extractionProcessor handles text extraction
 type extractionProcessor struct {
 	service extractor.Service
+	config  *Config
 }
 
 // NewExtractionProcessor creates a new extraction processor
-func NewExtractionProcessor(service extractor.Service) Processor {
+func NewExtractionProcessor(service extractor.Service, config *Config) Processor {
 	return &extractionProcessor{
 		service: service,
+		config:  config,
 	}
 }
 
@@ -33,9 +35,15 @@ func (p *extractionProcessor) Process(ctx context.Context, req *ProcessRequest) 
 
 	// Create extraction metadata
 	metadata := &extractor.DocumentMetadata{
-		FileName: req.FileName,
-		MimeType: req.ContentType,
-		Size:     req.Size,
+		FileName:   req.FileName,
+		MimeType:   req.ContentType,
+		Size:       req.Size,
+		Properties: make(map[string]string),
+	}
+	
+	// Add PDF page limit configuration
+	if p.config != nil && p.config.MaxPDFPages > 0 {
+		metadata.Properties["max_pdf_pages"] = fmt.Sprintf("%d", p.config.MaxPDFPages)
 	}
 
 	// Extract text
@@ -95,10 +103,14 @@ func (p *classificationProcessor) Process(ctx context.Context, req *ProcessReque
 		// Extract text first using basic extractor
 		extractorSvc := extractor.NewService()
 		extractorMetadata := &extractor.DocumentMetadata{
-			FileName: req.FileName,
-			MimeType: req.ContentType,
-			Size:     req.Size,
+			FileName:   req.FileName,
+			MimeType:   req.ContentType,
+			Size:       req.Size,
+			Properties: make(map[string]string),
 		}
+		
+		// Apply default PDF page limit
+		extractorMetadata.Properties["max_pdf_pages"] = "25"
 
 		extractionResult, err := extractorSvc.ExtractText(ctx, req.Content, extractorMetadata)
 		if err != nil {
