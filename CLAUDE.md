@@ -1,18 +1,19 @@
 # CLAUDE.md
 
-This file provides comprehensive guidance to Claude Code (claude.ai/code) when working with the Motion-Index Fiber codebase.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
 Motion-Index Fiber is a high-performance legal document processing API built with Go and Fiber, designed for California public defenders. The system features production-ready DigitalOcean integration with direct REST API calls and AWS S3 SDK, following strict TDD and UNIX philosophy principles.
 
 ### Core Technologies
-- **Runtime**: Go 1.21+ with Fiber v2 web framework
+- **Runtime**: Go 1.24+ with Fiber v2 web framework
 - **Cloud Platform**: DigitalOcean (Spaces storage, Managed OpenSearch, App Platform)
 - **Integration Pattern**: Direct DigitalOcean REST API + AWS S3 SDK for Spaces
 - **Authentication**: JWT with Supabase integration
 - **AI Processing**: Multi-model support (OpenAI GPT-4, Claude, Ollama) with unified prompts and enhanced date extraction
 - **Testing**: Comprehensive TDD with testify framework
+- **Document Processing**: PDF, DOCX, TXT extraction with OCR capabilities (Tesseract)
 
 ## Architecture
 
@@ -48,15 +49,22 @@ Motion-Index Fiber is a high-performance legal document processing API built wit
 - **`pkg/cloud/digitalocean/`**: Direct DigitalOcean API integration and service factory
 - **`pkg/processing/`**: Document processing pipeline (extract, classify, process)
   - **`classifier/`**: Multi-model AI classification (OpenAI, Claude, Ollama)
+  - **`extractor/`**: Multi-format text extraction (PDF, DOCX, TXT, OCR)
   - **`pipeline/`**: Document processing pipeline and workers
   - **`queue/`**: Priority queue and rate limiting for batch processing
+  - **`redaction/`**: PDF redaction analysis and processing
+  - **`migration/`**: Metadata migration utilities
 - **`pkg/search/`**: Search interfaces and OpenSearch client
 - **`pkg/storage/`**: Storage interfaces and utilities
 - **`internal/config/`**: Application configuration with validation
 - **`internal/handlers/`**: HTTP request handlers
 - **`internal/middleware/`**: Custom middleware (auth, error handling)
 - **`internal/models/`**: Data models and validation
+- **`internal/processing/`**: Internal processing coordinators
+- **`internal/hardware/`**: Hardware analysis utilities
 - **`internal/testutil/`**: Test utilities following UNIX principles
+- **`pkg/models/`**: Core data models (document, legal, search, time)
+- **`pkg/monitoring/`**: Metrics collection and monitoring
 
 ## Enhanced Date Extraction and Classification System
 
@@ -66,7 +74,7 @@ The system supports three AI models with unified prompt architecture:
 #### Supported Models
 - **OpenAI GPT-4**: Production-grade classification with comprehensive analysis
 - **Claude 3.5 Sonnet**: Advanced legal reasoning and structured extraction
-- **Ollama (Local)**: Privacy-focused local model support (Llama3, etc.)
+- **Ollama (Local)**: Privacy-focused local model support (GPT-OSS:20b)
 
 #### Unified Prompt System (`pkg/processing/classifier/prompts.go`)
 - **Centralized Prompts**: Single source of truth for all classification prompts
@@ -118,15 +126,6 @@ go run cmd/api-classifier/main.go classify-count 10
 go run cmd/api-classifier/main.go classify-all
 ```
 
-#### Batch Processing (Production)
-```bash
-# Batch classification with workers
-go run cmd/api-batch-classifier/main.go classify-all --limit=100
-
-# Monitor classification jobs
-go run cmd/api-batch-classifier/main.go status
-```
-
 #### Index Management
 ```bash
 # Setup OpenSearch index with proper mappings
@@ -144,7 +143,7 @@ go run cmd/inspect-index/main.go
 go mod tidy
 cp .env.example .env  # Edit with your configuration
 
-# Development server
+# Development server (runs on port 8003)
 go run cmd/server/main.go
 
 # Or with auto-reload (install air first)
@@ -215,9 +214,11 @@ go mod download
 
 #### Core Application
 ```bash
-PORT=6000
+PORT=8003
 ENVIRONMENT=local  # local, staging, production
+PRODUCTION=false   # Enable production optimizations
 JWT_SECRET=your-jwt-secret
+ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
 ```
 
 #### DigitalOcean Services (Production)
@@ -510,22 +511,14 @@ func (h *HealthHandler) DetailedStatus(c *fiber.Ctx) error {
 1. Configure `.env` with local/staging credentials
 2. Use `ENVIRONMENT=local` for mock services
 3. Run with `go run cmd/server/main.go`
-4. Access at `http://localhost:6000`
+4. Access at `http://localhost:8003`
 
 ### DigitalOcean App Platform
 1. Push to GitHub repository
 2. Configure environment variables in dashboard
-3. Deploy with `doctl apps create --spec deployments/digitalocean/app.yaml`
+3. Deploy via App Platform interface or API
 4. Monitor with health checks and logs
 
-### Docker Deployment
-```bash
-# Build image
-docker build -f deployments/docker/Dockerfile.prod -t motion-index:latest .
-
-# Run container
-docker run -d --name motion-index -p 6000:6000 --env-file .env.production motion-index:latest
-```
 
 ## Code Style & Conventions
 
@@ -582,7 +575,7 @@ docker run -d --name motion-index -p 6000:6000 --env-file .env.production motion
 ## Quick Reference Commands
 
 ```bash
-# Start development server
+# Start development server (runs on port 8003)
 go run cmd/server/main.go
 
 # Run tests with coverage
