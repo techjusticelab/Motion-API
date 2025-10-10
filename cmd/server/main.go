@@ -5,7 +5,6 @@ import (
     "fmt"
     "log"
     "os"
-    "strings"
     "os/signal"
     "syscall"
     "time"
@@ -22,10 +21,8 @@ import (
 )
 
 func main() {
-    // Load .env only for local development or when file exists
-    if strings.EqualFold(os.Getenv("ENVIRONMENT"), "local") {
-        _ = godotenv.Load()
-    } else if _, statErr := os.Stat(".env"); statErr == nil {
+    // Load .env if present (environment-agnostic)
+    if _, statErr := os.Stat(".env"); statErr == nil {
         _ = godotenv.Load()
     }
 

@@ -1,0 +1,20 @@
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: go run cmd/server/main.go
+    working_dir: /app
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    environment:
+      # Force production-like behavior locally; .env can override any of these
+      ENVIRONMENT: production
+      PRODUCTION: "true"
+      PORT: "8080"
+    ports:
+      - "8080:8080"

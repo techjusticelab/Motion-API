@@ -80,26 +80,25 @@ func (e *ConfigError) Error() string {
 func LoadFromEnvironment() (*Config, error) {
 	config := &Config{}
 
-	// Environment detection
-	env := strings.ToLower(os.Getenv("ENVIRONMENT"))
-	if env == "" {
-		env = "local" // Default to local development
-	}
-
-	switch env {
-	case "local":
-		config.Environment = EnvLocal
-	case "staging":
-		config.Environment = EnvStaging
-	case "production":
-		config.Environment = EnvProduction
-	default:
-		return nil, &ConfigError{
-			Field:   "environment",
-			Message: "invalid environment, must be one of: local, staging, production",
-			Value:   env,
-		}
-	}
+    // Environment detection (default to production-like)
+    env := strings.ToLower(os.Getenv("ENVIRONMENT"))
+    if env == "" {
+        env = string(EnvProduction)
+    }
+    switch env {
+    case string(EnvLocal):
+        config.Environment = EnvLocal
+    case string(EnvStaging):
+        config.Environment = EnvStaging
+    case string(EnvProduction):
+        config.Environment = EnvProduction
+    default:
+        return nil, &ConfigError{
+            Field:   "environment",
+            Message: "invalid environment, must be one of: local, staging, production",
+            Value:   env,
+        }
+    }
 
 	// Load DigitalOcean API Token
 	config.DigitalOcean.APIToken = os.Getenv("DO_API_TOKEN")

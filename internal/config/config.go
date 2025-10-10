@@ -120,13 +120,9 @@ func Load() (*Config, error) {
 		environment = "production"
 	}
 
-	// Set environment-specific defaults
-	var defaultOrigins string
-	if environment == "local" {
-		defaultOrigins = "http://localhost:3000,http://localhost:5173"
-	} else {
-		defaultOrigins = ""
-	}
+    // Default origins: require explicit configuration (production-like)
+    var defaultOrigins string
+    defaultOrigins = ""
 
 	// Parse numeric values with error handling
     // Determine OpenSearch port with broad env fallback (OPENSEARCH_*, DO_OPENSEARCH_*, ES_*)
@@ -210,7 +206,7 @@ func Load() (*Config, error) {
             Port:     opensearchPort,
             Username: getEnv("OPENSEARCH_USERNAME", getEnv("ES_USERNAME", getEnv("DO_OPENSEARCH_USERNAME", ""))),
             Password: getEnv("OPENSEARCH_PASSWORD", getEnv("ES_PASSWORD", getEnv("DO_OPENSEARCH_PASSWORD", ""))),
-            UseSSL:   getEnvBool("OPENSEARCH_USE_SSL", getEnvBool("ES_USE_SSL", getEnvBool("DO_OPENSEARCH_USE_SSL", environment != "local"))),
+            UseSSL:   getEnvBool("OPENSEARCH_USE_SSL", getEnvBool("ES_USE_SSL", getEnvBool("DO_OPENSEARCH_USE_SSL", true))),
             Index:    getEnv("OPENSEARCH_INDEX", getEnv("ES_INDEX", getEnv("DO_OPENSEARCH_INDEX", "documents"))),
         },
 		OpenAI: OpenAIConfig{
@@ -236,25 +232,20 @@ func Load() (*Config, error) {
 			RetryAttempts:  getEnvInt("AI_RETRY_ATTEMPTS", 3),
 			RetryDelay:     getEnvDuration("AI_RETRY_DELAY", 5*time.Second),
 		},
-		Logging: LoggingConfig{
-			Level:              getEnv("LOG_LEVEL", "info"),
-			Format:             getEnv("LOG_FORMAT", "text"),
-			EnableRequestLog:   getEnvBool("ENABLE_REQUEST_LOGGING", true),
-			EnableErrorDetails: getEnvBool("ENABLE_ERROR_DETAILS", environment == "local"),
-			EnableStackTrace:   getEnvBool("ENABLE_STACK_TRACE", environment == "local"),
-		},
+        Logging: LoggingConfig{
+            Level:              getEnv("LOG_LEVEL", "info"),
+            Format:             getEnv("LOG_FORMAT", "text"),
+            EnableRequestLog:   getEnvBool("ENABLE_REQUEST_LOGGING", true),
+            EnableErrorDetails: getEnvBool("ENABLE_ERROR_DETAILS", false),
+            EnableStackTrace:   getEnvBool("ENABLE_STACK_TRACE", false),
+        },
 	}
 
-	// Initialize DigitalOcean configuration
-	doConfigInstance, err := doConfig.LoadFromEnvironment()
-	if err != nil {
-		// For non-production environments, create a default config to allow development
-		if environment == "local" {
-			doConfigInstance = doConfig.DefaultConfig()
-		} else {
-			return nil, fmt.Errorf("failed to load DigitalOcean configuration: %w", err)
-		}
-	}
+    // Initialize DigitalOcean configuration (always require proper configuration; no local defaults)
+    doConfigInstance, err := doConfig.LoadFromEnvironment()
+    if err != nil {
+        return nil, fmt.Errorf("failed to load DigitalOcean configuration: %w", err)
+    }
 	cfg.DigitalOcean = doConfigInstance
 
 	// Validate required fields
@@ -338,54 +329,44 @@ func (c *Config) validateStorage() error {
 }
 
 func (c *Config) validateOpenSearch() error {
-	// OpenSearch host is always required
-	if c.OpenSearch.Host == "" {
-		return fmt.Errorf("OPENSEARCH_HOST is required")
-	}
+    // Always require OpenSearch host (production-like behavior)
+    if c.OpenSearch.Host == "" {
+        return fmt.Errorf("OPENSEARCH_HOST is required")
+    }
 
 	// Validate port is numeric and within range
 	if c.OpenSearch.Port < 1 || c.OpenSearch.Port > 65535 {
 		return fmt.Errorf("OPENSEARCH_PORT must be between 1 and 65535")
 	}
 
-	// For non-local environments, require authentication
-	if c.Environment != "local" {
-		if c.OpenSearch.Username == "" {
-			return fmt.Errorf("OPENSEARCH_USERNAME is required for non-local environments")
-		}
-		if c.OpenSearch.Password == "" {
-			return fmt.Errorf("OPENSEARCH_PASSWORD is required for non-local environments")
-		}
-	}
+    // Always require authentication
+    if c.OpenSearch.Username == "" {
+        return fmt.Errorf("OPENSEARCH_USERNAME is required")
+    }
+    if c.OpenSearch.Password == "" {
+        return fmt.Errorf("OPENSEARCH_PASSWORD is required")
+    }
 
 	return nil
 }
 
 func (c *Config) validateAuth() error {
-	// JWT secret is always required
-	if c.Auth.JWTSecret == "" {
-		return fmt.Errorf("JWT_SECRET is required")
-	}
-
-	// Validate Supabase URL format if provided
-	if c.Auth.SupabaseURL != "" {
-		if !isValidURL(c.Auth.SupabaseURL) {
-			return fmt.Errorf("SUPABASE_URL must be a valid URL")
-		}
-	}
-
-	// For non-local environments, require Supabase configuration
-	if c.Environment != "local" {
-		if c.Auth.SupabaseURL == "" {
-			return fmt.Errorf("SUPABASE_URL is required for non-local environments")
-		}
-		if c.Auth.SupabaseAnonKey == "" {
-			return fmt.Errorf("SUPABASE_ANON_KEY is required for non-local environments")
-		}
-		if c.Auth.SupabaseAPIKey == "" {
-			return fmt.Errorf("SUPABASE_API_KEY is required for non-local environments")
-		}
-	}
+    // Always require JWT secret and Supabase configuration (production-like)
+    if c.Auth.JWTSecret == "" {
+        return fmt.Errorf("JWT_SECRET is required")
+    }
+    if c.Auth.SupabaseURL == "" {
+        return fmt.Errorf("SUPABASE_URL is required")
+    }
+    if !isValidURL(c.Auth.SupabaseURL) {
+        return fmt.Errorf("SUPABASE_URL must be a valid URL")
+    }
+    if c.Auth.SupabaseAnonKey == "" {
+        return fmt.Errorf("SUPABASE_ANON_KEY is required")
+    }
+    if c.Auth.SupabaseAPIKey == "" {
+        return fmt.Errorf("SUPABASE_API_KEY is required")
+    }
 
 	return nil
 }
