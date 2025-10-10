@@ -12,8 +12,8 @@ services:
     # Our server reads PORT from env, so we just expose the same http_port here.
     http_port: 8080
 
-    # Run the server directly (no custom build step required)
-    run_command: go run cmd/server/main.go
+    # Start the compiled binary built by the Go buildpack
+    run_command: bin/server
 
     routes:
       - path: /
@@ -23,6 +23,10 @@ services:
       path: /health
 
     envs:
+      # Limit what the Heroku Go buildpack installs to just the server binary
+      - key: GO_INSTALL_PACKAGE_SPEC
+        value: ./cmd/server
+        scope: RUN_AND_BUILD_TIME
       # Core environment
       - key: ENVIRONMENT
         value: production

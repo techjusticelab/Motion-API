@@ -37,15 +37,15 @@ func (e *pdfExtractor) Extract(ctx context.Context, reader io.Reader, metadata *
 				PageCount: 0,
 				Language:  "unknown",
 				Metadata: map[string]interface{}{
-					"format":         "pdf",
-					"extraction":     "failed_panic_recovery",
-					"error":          fmt.Sprintf("panic: %v", r),
+					"format":          "pdf",
+					"extraction":      "failed_panic_recovery",
+					"error":           fmt.Sprintf("panic: %v", r),
 					"pages_processed": 0,
 				},
 			}
 		}
 	}()
-	
+
 	// Read the PDF content
 	content, err := io.ReadAll(reader)
 	if err != nil {
@@ -103,7 +103,7 @@ func (e *pdfExtractor) Extract(ctx context.Context, reader io.Reader, metadata *
 		log.Printf("[PDF-EXTRACT] 🔍 About to return result: Text=%d chars, WordCount=%d, CharCount=%d",
 			len(text), wordCount, charCount)
 
-		result := &ExtractionResult{
+		result = &ExtractionResult{
 			Text:      text,
 			WordCount: wordCount,
 			CharCount: charCount,
@@ -145,7 +145,7 @@ func (e *pdfExtractor) Extract(ctx context.Context, reader io.Reader, metadata *
 	log.Printf("[PDF-EXTRACT] 🔍 Fallback path - About to return result: Text=%d chars, WordCount=%d",
 		len(text), wordCount)
 
-	result := &ExtractionResult{
+	result = &ExtractionResult{
 		Text:      text,
 		WordCount: wordCount,
 		CharCount: charCount,
@@ -374,7 +374,7 @@ func (e *pdfExtractor) cleanExtractedText(text string) string {
 func (e *pdfExtractor) extractAllText(reader *pdf.Reader, metadata *DocumentMetadata) (string, int, error) {
 	var allText strings.Builder
 	pageCount := reader.NumPage()
-	
+
 	// Get page limit from metadata properties, default to 25
 	maxPages := 25
 	if metadata != nil && metadata.Properties != nil {
@@ -384,7 +384,7 @@ func (e *pdfExtractor) extractAllText(reader *pdf.Reader, metadata *DocumentMeta
 			}
 		}
 	}
-	
+
 	// Determine actual pages to process
 	pagesToProcess := pageCount
 	limitReached := false
@@ -392,12 +392,12 @@ func (e *pdfExtractor) extractAllText(reader *pdf.Reader, metadata *DocumentMeta
 		pagesToProcess = maxPages
 		limitReached = true
 	}
-	
-	log.Printf("[PDF-EXTRACT] 📖 PDF has %d pages, processing %d pages (limit: %d)", 
+
+	log.Printf("[PDF-EXTRACT] 📖 PDF has %d pages, processing %d pages (limit: %d)",
 		pageCount, pagesToProcess, maxPages)
-	
+
 	if limitReached {
-		log.Printf("[PDF-EXTRACT] ⚠️ Page limit reached: processing only first %d of %d pages", 
+		log.Printf("[PDF-EXTRACT] ⚠️ Page limit reached: processing only first %d of %d pages",
 			maxPages, pageCount)
 	}
 
@@ -408,14 +408,14 @@ func (e *pdfExtractor) extractAllText(reader *pdf.Reader, metadata *DocumentMeta
 			runtime.ReadMemStats(&memStats)
 			// If we're using more than 200MB for this extraction, abort
 			if memStats.Alloc > 200*1024*1024 {
-				log.Printf("[PDF-EXTRACT] ⚠️ Memory limit reached at page %d (%d MB), aborting extraction", 
+				log.Printf("[PDF-EXTRACT] ⚠️ Memory limit reached at page %d (%d MB), aborting extraction",
 					pageNum, memStats.Alloc/(1024*1024))
 				limitReached = true
 				pagesToProcess = pageNum - 1
 				break
 			}
 		}
-		
+
 		page := reader.Page(pageNum)
 		if page.V.IsNull() {
 			log.Printf("[PDF-EXTRACT] ⚠️ Page %d is null, skipping", pageNum)
@@ -436,7 +436,7 @@ func (e *pdfExtractor) extractAllText(reader *pdf.Reader, metadata *DocumentMeta
 
 		// Check if we have excessive text accumulation
 		if allText.Len() > 10*1024*1024 { // 10MB of text is excessive
-			log.Printf("[PDF-EXTRACT] ⚠️ Text length limit reached at page %d (%d chars), aborting extraction", 
+			log.Printf("[PDF-EXTRACT] ⚠️ Text length limit reached at page %d (%d chars), aborting extraction",
 				pageNum, allText.Len())
 			limitReached = true
 			pagesToProcess = pageNum
@@ -451,16 +451,16 @@ func (e *pdfExtractor) extractAllText(reader *pdf.Reader, metadata *DocumentMeta
 	}
 
 	finalText := allText.String()
-	
+
 	// Add metadata about page limiting
 	resultPageCount := pagesToProcess
 	if limitReached {
-		log.Printf("[PDF-EXTRACT] 📊 Limited extraction result: %d chars from %d pages (limit reached, skipped %d pages)", 
+		log.Printf("[PDF-EXTRACT] 📊 Limited extraction result: %d chars from %d pages (limit reached, skipped %d pages)",
 			len(finalText), pagesToProcess, pageCount-pagesToProcess)
 	} else {
 		log.Printf("[PDF-EXTRACT] 📊 Total extraction result: %d chars from %d pages", len(finalText), pageCount)
 	}
-	
+
 	return finalText, resultPageCount, nil
 }
 
@@ -468,7 +468,7 @@ func (e *pdfExtractor) extractAllText(reader *pdf.Reader, metadata *DocumentMeta
 func (e *pdfExtractor) cleanText(text string) string {
 	// Create text cleaner with default configuration
 	cleaner := NewTextCleaner(DefaultCleaningConfig())
-	
+
 	// Apply enhanced cleaning
 	log.Printf("[PDF-EXTRACT] 🧹 Before enhanced cleaning: %d chars", len(text))
 	text = cleaner.CleanText(text)
@@ -629,15 +629,15 @@ func (e *pdfExtractor) isRepeatedCharacterLine(line string) bool {
 	if len(line) < 5 {
 		return false
 	}
-	
+
 	// Common repeated characters used in forms and layouts
 	repeatedChars := map[rune]int{
 		'.': 0, '-': 0, '_': 0, '=': 0, '*': 0, '+': 0, '~': 0,
 	}
-	
+
 	totalChars := 0
 	repeatedCount := 0
-	
+
 	for _, r := range line {
 		if r == ' ' || r == '\t' { // Skip whitespace
 			continue
@@ -648,12 +648,12 @@ func (e *pdfExtractor) isRepeatedCharacterLine(line string) bool {
 			repeatedCount++
 		}
 	}
-	
+
 	// If more than 70% of non-whitespace characters are repeated chars
 	if totalChars > 0 && float64(repeatedCount)/float64(totalChars) > 0.7 {
 		return true
 	}
-	
+
 	// Special case: check for patterns like ".-.-.-" or "_._._.
 	for char := range repeatedChars {
 		pattern := string(char)
@@ -668,7 +668,7 @@ func (e *pdfExtractor) isRepeatedCharacterLine(line string) bool {
 			}
 		}
 	}
-	
+
 	return false
 }
 
@@ -677,7 +677,7 @@ func (e *pdfExtractor) isFormFieldLine(line string) bool {
 	if len(line) < 10 {
 		return false
 	}
-	
+
 	// Count dots and letters
 	dotCount := strings.Count(line, ".")
 	letterCount := 0
@@ -686,7 +686,7 @@ func (e *pdfExtractor) isFormFieldLine(line string) bool {
 			letterCount++
 		}
 	}
-	
+
 	// Form fields typically have format like "Name: ........................."
 	// or "Address .............................. Phone ................"
 	if dotCount >= 5 && letterCount > 0 && letterCount < 20 {
@@ -695,20 +695,20 @@ func (e *pdfExtractor) isFormFieldLine(line string) bool {
 			"name", "address", "date", "phone", "signature", "title",
 			"city", "state", "zip", "email", "age", "sex", "occupation",
 		}
-		
+
 		lineLower := strings.ToLower(line)
 		for _, pattern := range formPatterns {
 			if strings.Contains(lineLower, pattern) && dotCount > letterCount {
 				return true
 			}
 		}
-		
+
 		// Generic check: if line has colon followed by lots of dots
 		if strings.Contains(line, ":") && dotCount > 10 {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -717,16 +717,16 @@ func (e *pdfExtractor) isHeaderFooterLine(line string) bool {
 	if len(line) == 0 {
 		return false
 	}
-	
+
 	lineLower := strings.ToLower(strings.TrimSpace(line))
-	
+
 	// Common header/footer patterns
 	headerFooterPatterns := []string{
 		"page ", "of ", "continued", "confidential", "draft",
 		"proprietary", "exhibit ", "attachment ", "schedule ",
 		"case no", "docket", "filed", "clerk", "court",
 	}
-	
+
 	// Check for simple page numbering
 	if regexp.MustCompile(`^page\s+\d+`).MatchString(lineLower) {
 		return true
@@ -737,17 +737,17 @@ func (e *pdfExtractor) isHeaderFooterLine(line string) bool {
 	if regexp.MustCompile(`^-\s*\d+\s*-$`).MatchString(line) {
 		return true
 	}
-	
+
 	// Check for date stamps (MM/DD/YYYY or Month DD, YYYY format)
 	if regexp.MustCompile(`\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}`).MatchString(line) && len(line) < 30 {
 		return true
 	}
-	
+
 	// Check for document ID patterns
 	if regexp.MustCompile(`^[A-Z0-9\-]{8,}$`).MatchString(strings.ReplaceAll(line, " ", "")) {
 		return true
 	}
-	
+
 	// Check for patterns in short lines
 	if len(line) < 50 {
 		for _, pattern := range headerFooterPatterns {
@@ -756,7 +756,7 @@ func (e *pdfExtractor) isHeaderFooterLine(line string) bool {
 			}
 		}
 	}
-	
+
 	return false
 }
 
@@ -764,23 +764,23 @@ func (e *pdfExtractor) isHeaderFooterLine(line string) bool {
 func (e *pdfExtractor) cleanTableOfContentsArtifacts(line string) string {
 	// Pattern for TOC lines: "Chapter Title ................... Page 42"
 	// Keep the title and page number, remove the dots
-	
+
 	// Check if line has pattern: text + dots + number
 	if strings.Count(line, ".") < 5 {
 		return line
 	}
-	
+
 	// Use regex to find: (text)(dots)(optional spaces)(number)
 	tocPattern := regexp.MustCompile(`^(.+?)(\.{5,})(\s*)(\d+)?\s*$`)
 	matches := tocPattern.FindStringSubmatch(line)
-	
+
 	if len(matches) >= 3 {
 		title := strings.TrimSpace(matches[1])
 		pageNum := ""
 		if len(matches) >= 5 && matches[4] != "" {
 			pageNum = matches[4]
 		}
-		
+
 		// Only keep if title has substantial content
 		if len(title) > 3 && e.hasAlphanumeric(title) {
 			if pageNum != "" {
@@ -789,7 +789,7 @@ func (e *pdfExtractor) cleanTableOfContentsArtifacts(line string) string {
 			return title
 		}
 	}
-	
+
 	return line
 }
 
