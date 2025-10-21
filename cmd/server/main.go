@@ -6,6 +6,7 @@ import (
     "log"
     "os"
     "os/signal"
+    "runtime"
     "syscall"
     "time"
 
@@ -39,11 +40,62 @@ func main() {
 		ErrorHandler: middleware.ErrorHandler,
 	})
 
-	// Global middleware
-	app.Use(recover.New())
+	// Global middleware with enhanced panic recovery
+	app.Use(recover.New(recover.Config{
+		EnableStackTrace: true,
+		StackTraceHandler: func(c *fiber.Ctx, e interface{}) {
+			// Get memory stats for debugging
+			var memStats runtime.MemStats
+			runtime.ReadMemStats(&memStats)
+			
+			log.Printf("[PANIC-RECOVERY] 💥 Panic recovered: %v", e)
+			log.Printf("[PANIC-RECOVERY] 📊 Memory at panic: Alloc=%dMB, Sys=%dMB, GC=%d", 
+				memStats.Alloc/(1024*1024), memStats.Sys/(1024*1024), memStats.NumGC)
+			log.Printf("[PANIC-RECOVERY] 📍 Request: %s %s", c.Method(), c.Path())
+			
+			// Force garbage collection after panic
+			runtime.GC()
+			
+			// Log stack trace for debugging
+			if cfg.Environment != "production" {
+				log.Printf("[PANIC-RECOVERY] Stack trace: %+v", e)
+			}
+		},
+	}))
 	app.Use(logger.New(logger.Config{
 		Format: "[${time}] ${status} - ${method} ${path} - ${latency}\n",
 	}))
+	
+	// Memory pressure middleware - reject requests if memory usage is too high
+	app.Use(func(c *fiber.Ctx) error {
+		// Only apply to heavy processing endpoints
+		path := c.Path()
+		if path == "/api/v1/categorise" || path == "/api/v1/analyze-redactions" {
+			var memStats runtime.MemStats
+			runtime.ReadMemStats(&memStats)
+			
+			// If using more than 800MB, reject new requests
+			const maxMemoryMB = 800
+			currentMemoryMB := memStats.Alloc / (1024 * 1024)
+			
+			if currentMemoryMB > maxMemoryMB {
+				log.Printf("[MEMORY-GUARD] 🚫 Rejecting request due to high memory usage: %dMB > %dMB", 
+					currentMemoryMB, maxMemoryMB)
+				return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+					"success": false,
+					"error": map[string]interface{}{
+						"code":    "memory_pressure",
+						"message": "Server is under memory pressure, please try again later",
+						"details": map[string]interface{}{
+							"current_memory_mb": currentMemoryMB,
+							"max_memory_mb":     maxMemoryMB,
+						},
+					},
+				})
+			}
+		}
+		return c.Next()
+	})
 	
 	// Temporarily disabled security middleware for embedding issues
 	// TODO: Re-enable with proper configuration for production

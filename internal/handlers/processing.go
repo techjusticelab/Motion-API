@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -346,8 +347,24 @@ func convertInternalRedactionItems(items []internalModels.RedactionItem) []redac
 	return result
 }
 
-// ProcessDocument processes a single document upload
+// ProcessDocument processes a single document upload with timeout and error recovery
 func (h *ProcessingHandler) ProcessDocument(c *fiber.Ctx) error {
+	// Create a timeout context for the entire processing operation
+	ctx, cancel := context.WithTimeout(c.Context(), 60*time.Second) // 60 second timeout
+	defer cancel()
+
+	// Add panic recovery for this handler
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[PROCESSING-HANDLER] 💥 Panic recovered in ProcessDocument: %v", r)
+			// Return error response for panic
+			c.Status(fiber.StatusInternalServerError).JSON(internalModels.NewErrorResponse(
+				"processing_panic",
+				"Processing failed due to internal error",
+				map[string]interface{}{"panic": fmt.Sprintf("%v", r)},
+			))
+		}
+	}()
 	// Parse the multipart form
 	form, err := c.MultipartForm()
 	if err != nil {
@@ -440,9 +457,9 @@ func (h *ProcessingHandler) ProcessDocument(c *fiber.Ctx) error {
 		})
 	}
 
-	// Process the document using the pipeline
+	// Process the document using the pipeline with context
 	startTime := time.Now()
-	result, err := h.processDocumentWithPipeline(request)
+	result, err := h.processDocumentWithPipeline(ctx, request)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(internalModels.NewErrorResponse(
 			"processing_error",
@@ -528,7 +545,7 @@ func (h *ProcessingHandler) BatchProcessDocuments(c *fiber.Ctx) error {
 }
 
 // processDocumentWithPipeline processes a single document through the pipeline
-func (h *ProcessingHandler) processDocumentWithPipeline(request *internalModels.ProcessDocumentRequest) (*internalModels.ProcessDocumentResponse, error) {
+func (h *ProcessingHandler) processDocumentWithPipeline(ctx context.Context, request *internalModels.ProcessDocumentRequest) (*internalModels.ProcessDocumentResponse, error) {
 	file := request.File
 
 	// Generate document ID
@@ -606,10 +623,7 @@ func (h *ProcessingHandler) processDocumentWithPipeline(request *internalModels.
 		},
 	}
 
-	// Process document through pipeline
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(request.Options.TimeoutSeconds)*time.Second)
-	defer cancel()
-
+	// Process document through pipeline (using the context passed from handler)
 	pipelineResult, err := h.pipeline.ProcessDocument(ctx, pipelineRequest)
 	if err != nil {
 		response.Status = "failed"
@@ -885,8 +899,9 @@ func (h *ProcessingHandler) processBatchDocuments(request *internalModels.BatchP
 			Options:     request.Options,
 		}
 
-		// Process the document
-		result, err := h.processDocumentWithPipeline(individualRequest)
+		// Process the document with context
+		ctx := context.Background() // Create a new context for each document in batch
+		result, err := h.processDocumentWithPipeline(ctx, individualRequest)
 		if err != nil {
 			response.FailureCount++
 			response.Errors = append(response.Errors, &internalModels.BatchProcessError{

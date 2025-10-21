@@ -25,10 +25,22 @@ func NewPDFExtractor() Extractor {
 
 // Extract extracts text from PDF files with fallback mechanisms
 func (e *pdfExtractor) Extract(ctx context.Context, reader io.Reader, metadata *DocumentMetadata) (result *ExtractionResult, err error) {
-	// Add panic recovery to prevent server crashes
+	// Enhanced panic recovery to prevent server crashes
 	defer func() {
 		if r := recover(); r != nil {
+			// Get memory stats for debugging
+			var memStats runtime.MemStats
+			runtime.ReadMemStats(&memStats)
+			
 			log.Printf("[PDF-EXTRACT] 💥 Panic recovered: %v", r)
+			log.Printf("[PDF-EXTRACT] 📊 Memory at panic: Alloc=%dMB, Sys=%dMB, GC=%d", 
+				memStats.Alloc/(1024*1024), memStats.Sys/(1024*1024), memStats.NumGC)
+			log.Printf("[PDF-EXTRACT] 📄 File: %s, Size: %d bytes", metadata.FileName, len(metadata.Properties))
+			
+			// Force aggressive garbage collection
+			runtime.GC()
+			runtime.GC() // Double GC for thorough cleanup
+			
 			err = NewExtractionError("pdf", fmt.Sprintf("PDF processing panic: %v", r), nil)
 			result = &ExtractionResult{
 				Text:      "",
@@ -41,15 +53,30 @@ func (e *pdfExtractor) Extract(ctx context.Context, reader io.Reader, metadata *
 					"extraction":      "failed_panic_recovery",
 					"error":           fmt.Sprintf("panic: %v", r),
 					"pages_processed": 0,
+					"memory_at_panic_mb": memStats.Alloc / (1024 * 1024),
 				},
 			}
 		}
 	}()
 
-	// Read the PDF content
+	// Check if context is already cancelled
+	select {
+	case <-ctx.Done():
+		return nil, NewExtractionError("pdf", "context cancelled before reading PDF", ctx.Err())
+	default:
+	}
+
+	// Read the PDF content with context awareness
 	content, err := io.ReadAll(reader)
 	if err != nil {
 		return nil, NewExtractionError("pdf", "failed to read PDF file", err)
+	}
+
+	// Check context again after reading
+	select {
+	case <-ctx.Done():
+		return nil, NewExtractionError("pdf", "context cancelled after reading PDF", ctx.Err())
+	default:
 	}
 
 	log.Printf("[PDF-EXTRACT] 📄 Processing PDF: %s, size: %d bytes", metadata.FileName, len(content))
@@ -87,9 +114,9 @@ func (e *pdfExtractor) Extract(ctx context.Context, reader io.Reader, metadata *
 		}
 	}
 
-	// Try primary extraction method
+	// Try primary extraction method with context
 	log.Printf("[PDF-EXTRACT] 🔄 Attempting primary extraction method (ledongthuc/pdf)")
-	text, pageCount, err := e.extractWithPrimaryMethod(content, metadata)
+	text, pageCount, err := e.extractWithPrimaryMethod(ctx, content, metadata)
 	if err == nil && text != "" {
 		// Success with primary method
 		log.Printf("[PDF-EXTRACT] ✅ Primary method successful: %d chars, %d pages", len(text), pageCount)
@@ -174,7 +201,7 @@ func (e *pdfExtractor) CanExtract(format string) bool {
 }
 
 // extractWithPrimaryMethod uses the original ledongthuc/pdf method
-func (e *pdfExtractor) extractWithPrimaryMethod(content []byte, metadata *DocumentMetadata) (string, int, error) {
+func (e *pdfExtractor) extractWithPrimaryMethod(ctx context.Context, content []byte, metadata *DocumentMetadata) (string, int, error) {
 	// Create a reader from the content
 	contentReader := bytes.NewReader(content)
 
@@ -187,8 +214,8 @@ func (e *pdfExtractor) extractWithPrimaryMethod(content []byte, metadata *Docume
 	}
 
 	log.Printf("[PDF-EXTRACT] ✅ PDF opened successfully, extracting text from pages")
-	// Extract text from pages (respecting page limit)
-	text, pageCount, err := e.extractAllText(pdfReader, metadata)
+	// Extract text from pages (respecting page limit) with context
+	text, pageCount, err := e.extractAllText(ctx, pdfReader, metadata)
 	log.Printf("[PDF-EXTRACT] 📊 Primary extraction result: %d chars, %d pages, err: %v", len(text), pageCount, err)
 	return text, pageCount, err
 }
@@ -370,8 +397,8 @@ func (e *pdfExtractor) cleanExtractedText(text string) string {
 	return strings.TrimSpace(cleaned.String())
 }
 
-// extractAllText extracts text from all pages of the PDF
-func (e *pdfExtractor) extractAllText(reader *pdf.Reader, metadata *DocumentMetadata) (string, int, error) {
+// extractAllText extracts text from all pages of the PDF with enhanced memory management
+func (e *pdfExtractor) extractAllText(ctx context.Context, reader *pdf.Reader, metadata *DocumentMetadata) (string, int, error) {
 	var allText strings.Builder
 	pageCount := reader.NumPage()
 
@@ -402,19 +429,28 @@ func (e *pdfExtractor) extractAllText(reader *pdf.Reader, metadata *DocumentMeta
 	}
 
 	for pageNum := 1; pageNum <= pagesToProcess; pageNum++ {
-		// Check memory usage every few pages to prevent crashes
-		if pageNum%5 == 0 {
-			var memStats runtime.MemStats
-			runtime.ReadMemStats(&memStats)
-			// If we're using more than 200MB for this extraction, abort
-			if memStats.Alloc > 200*1024*1024 {
-				log.Printf("[PDF-EXTRACT] ⚠️ Memory limit reached at page %d (%d MB), aborting extraction",
-					pageNum, memStats.Alloc/(1024*1024))
-				limitReached = true
-				pagesToProcess = pageNum - 1
-				break
-			}
+		// Check context cancellation before each page
+		select {
+		case <-ctx.Done():
+			log.Printf("[PDF-EXTRACT] ⏰ Context cancelled at page %d, aborting extraction", pageNum)
+			return allText.String(), pageNum - 1, ctx.Err()
+		default:
 		}
+		
+		// Check memory usage before each page to prevent crashes
+		var memStats runtime.MemStats
+		runtime.ReadMemStats(&memStats)
+		// If we're using more than 300MB for this extraction, abort (reduced from 500MB)
+		if memStats.Alloc > 300*1024*1024 {
+			log.Printf("[PDF-EXTRACT] ⚠️ Memory limit reached at page %d (%d MB), aborting extraction",
+				pageNum, memStats.Alloc/(1024*1024))
+			limitReached = true
+			pagesToProcess = pageNum - 1
+			break
+		}
+		
+		log.Printf("[PDF-EXTRACT] 📄 Processing page %d/%d (Memory: %dMB)", 
+			pageNum, pagesToProcess, memStats.Alloc/(1024*1024))
 
 		page := reader.Page(pageNum)
 		if page.V.IsNull() {
@@ -434,8 +470,8 @@ func (e *pdfExtractor) extractAllText(reader *pdf.Reader, metadata *DocumentMeta
 			continue
 		}
 
-		// Check if we have excessive text accumulation
-		if allText.Len() > 10*1024*1024 { // 10MB of text is excessive
+		// Check if we have excessive text accumulation (reduced from 5MB to 2MB)
+		if allText.Len() > 2*1024*1024 { // 2MB of text is excessive
 			log.Printf("[PDF-EXTRACT] ⚠️ Text length limit reached at page %d (%d chars), aborting extraction",
 				pageNum, allText.Len())
 			limitReached = true
@@ -448,9 +484,18 @@ func (e *pdfExtractor) extractAllText(reader *pdf.Reader, metadata *DocumentMeta
 			allText.WriteString("\n\n")
 		}
 		allText.WriteString(pageText)
+		
+		// Force garbage collection every 3 pages to manage memory more aggressively
+		if pageNum%3 == 0 {
+			runtime.GC()
+			log.Printf("[PDF-EXTRACT] 🗑️ Forced GC at page %d", pageNum)
+		}
 	}
 
 	finalText := allText.String()
+	
+	// Clear the builder to free memory immediately
+	allText.Reset()
 
 	// Add metadata about page limiting
 	resultPageCount := pagesToProcess
@@ -459,6 +504,12 @@ func (e *pdfExtractor) extractAllText(reader *pdf.Reader, metadata *DocumentMeta
 			len(finalText), pagesToProcess, pageCount-pagesToProcess)
 	} else {
 		log.Printf("[PDF-EXTRACT] 📊 Total extraction result: %d chars from %d pages", len(finalText), pageCount)
+	}
+	
+	// Force final GC for large extractions
+	if len(finalText) > 1024*1024 { // > 1MB
+		runtime.GC()
+		log.Printf("[PDF-EXTRACT] 🗑️ Final GC after large extraction (%d chars)", len(finalText))
 	}
 
 	return finalText, resultPageCount, nil

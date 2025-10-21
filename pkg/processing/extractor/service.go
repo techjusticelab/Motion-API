@@ -52,6 +52,17 @@ func (s *service) registerDefaultExtractors() {
 func (s *service) ExtractText(ctx context.Context, reader io.Reader, metadata *DocumentMetadata) (*ExtractionResult, error) {
 	startTime := time.Now()
 
+	// Check if context is already cancelled
+	select {
+	case <-ctx.Done():
+		return &ExtractionResult{
+			Success:  false,
+			Error:    "context cancelled before extraction",
+			Duration: time.Since(startTime).Milliseconds(),
+		}, ctx.Err()
+	default:
+	}
+
 	// Determine format if not provided
 	if metadata.Format == "" {
 		metadata.Format = s.detectFormat(metadata.FileName, metadata.MimeType)
