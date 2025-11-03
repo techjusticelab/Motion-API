@@ -32,7 +32,7 @@ func NewOpenAIClassifier(config *Config) (Classifier, error) {
 
 	timeout := config.Timeout
 	if timeout == 0 {
-		timeout = 30 * time.Second
+		timeout = 10 * time.Minute // Increased default timeout for LLMs (prevents premature timeouts that waste credits)
 	}
 
 	return &openaiClassifier{
@@ -435,27 +435,28 @@ func (c *openaiClassifier) isRetryableError(err error) bool {
 	}
 
 	errStr := err.Error()
-	
+
 	// Retry on rate limit errors (429)
 	if strings.Contains(errStr, "status 429") {
 		return true
 	}
-	
+
 	// Retry on server errors (5xx)
 	if strings.Contains(errStr, "status 5") {
 		return true
 	}
-	
-	// Retry on timeout errors
+
+	// DO NOT retry on timeout errors - LLMs may need more time to respond
+	// Retrying on timeout wastes API credits by calling the same document multiple times
 	if strings.Contains(errStr, "timeout") || strings.Contains(errStr, "context deadline exceeded") {
-		return true
+		return false
 	}
-	
-	// Retry on connection errors
+
+	// Retry on connection errors (network failures, not timeouts)
 	if strings.Contains(errStr, "connection") || strings.Contains(errStr, "network") {
 		return true
 	}
-	
+
 	// Don't retry on client errors (4xx except 429), authentication errors, etc.
 	return false
 }

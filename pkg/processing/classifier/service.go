@@ -23,9 +23,10 @@ type Config struct {
 
 // ClaudeConfig holds configuration for Claude API
 type ClaudeConfig struct {
-	APIKey  string `json:"api_key"`
-	Model   string `json:"model"`
-	BaseURL string `json:"base_url"`
+	APIKey  string        `json:"api_key"`
+	Model   string        `json:"model"`
+	BaseURL string        `json:"base_url"`
+	Timeout time.Duration `json:"timeout"`
 }
 
 // OllamaConfig holds configuration for Ollama local models
@@ -63,6 +64,7 @@ func NewService(config *Config) (Service, error) {
 			APIKey:  config.APIKey,
 			Model:   config.Model,
 			BaseURL: "https://api.anthropic.com",
+			Timeout: config.Timeout,
 		}
 		classifier, err = NewClaudeClassifier(claudeConfig)
 	case "ollama":

@@ -73,8 +73,9 @@ type OpenSearchConfig struct {
 }
 
 type OpenAIConfig struct {
-	APIKey string
-	Model  string
+	APIKey  string
+	Model   string
+	Timeout time.Duration
 }
 
 type AIConfig struct {
@@ -94,9 +95,10 @@ type AIConfig struct {
 }
 
 type ClaudeConfig struct {
-	APIKey string
-	Model  string
+	APIKey  string
+	Model   string
 	BaseURL string // Optional custom endpoint
+	Timeout time.Duration
 }
 
 type OllamaConfig struct {
@@ -114,146 +116,8 @@ type LoggingConfig struct {
 }
 
 func Load() (*Config, error) {
-	// Determine environment
-	environment := getEnv("ENVIRONMENT", "local")
-	if getEnvBool("PRODUCTION", false) {
-		environment = "production"
-	}
-
-    // Default origins: require explicit configuration (production-like)
-    var defaultOrigins string
-    defaultOrigins = ""
-
-	// Parse numeric values with error handling
-    // Determine OpenSearch port with broad env fallback (OPENSEARCH_*, DO_OPENSEARCH_*, ES_*)
-    opensearchPort, err := parseEnvInt("OPENSEARCH_PORT", getEnvInt("ES_PORT", 9200))
-    if os.Getenv("OPENSEARCH_PORT") == "" && os.Getenv("ES_PORT") == "" {
-        if v := os.Getenv("DO_OPENSEARCH_PORT"); v != "" {
-            if p, pErr := strconv.Atoi(v); pErr == nil {
-                opensearchPort = p
-            } else {
-                return nil, fmt.Errorf("DO_OPENSEARCH_PORT must be a valid number")
-            }
-        }
-    }
-	if err != nil {
-		return nil, err
-	}
-
-	maxRequestSize, err := parseEnvInt64("MAX_REQUEST_SIZE", 100*1024*1024)
-	if err != nil {
-		return nil, err
-	}
-
-	maxFileSize, err := parseEnvInt64("MAX_FILE_SIZE", 100*1024*1024)
-	if err != nil {
-		return nil, err
-	}
-
-	maxWorkers, err := parseEnvInt("MAX_WORKERS", 10)
-	if err != nil {
-		return nil, err
-	}
-
-	batchSize, err := parseEnvInt("BATCH_SIZE", 50)
-	if err != nil {
-		return nil, err
-	}
-
-	processTimeout, err := parseEnvDuration("PROCESS_TIMEOUT", 5*time.Minute)
-	if err != nil {
-		return nil, err
-	}
-
-	cfg := &Config{
-		Environment: environment,
-		Server: ServerConfig{
-			Port:           os.Getenv("PORT"), // Don't use default to allow validation
-			Production:     environment == "production" || environment == "staging" || getEnvBool("PRODUCTION", false),
-			AllowedOrigins: getEnv("ALLOWED_ORIGINS", defaultOrigins),
-			MaxRequestSize: maxRequestSize,
-		},
-		Database: DatabaseConfig{
-			Host:     getEnv("DB_HOST", "localhost"),
-			Port:     getEnvInt("DB_PORT", 5432),
-			Username: getEnv("DB_USERNAME", "postgres"),
-			Password: getEnv("DB_PASSWORD", ""),
-			Database: getEnv("DB_DATABASE", "motion_index"),
-			UseSSL:   getEnvBool("DB_USE_SSL", false),
-		},
-        Storage: StorageConfig{
-            Backend:   getEnv("STORAGE_BACKEND", "local"),
-            AccessKey: getEnv("STORAGE_ACCESS_KEY", getEnv("DO_SPACES_ACCESS_KEY", getEnv("DO_SPACES_KEY", ""))),
-            SecretKey: getEnv("STORAGE_SECRET_KEY", getEnv("DO_SPACES_SECRET_KEY", getEnv("DO_SPACES_SECRET", ""))),
-            Bucket:    getEnv("STORAGE_BUCKET", getEnv("DO_SPACES_BUCKET", "motion-index-docs")),
-            Region:    getEnv("STORAGE_REGION", getEnv("DO_SPACES_REGION", "nyc3")),
-            CDNDomain: getEnv("STORAGE_CDN_DOMAIN", getEnv("DO_SPACES_CDN_DOMAIN", "")),
-        },
-		Auth: AuthConfig{
-			JWTSecret:       getEnv("JWT_SECRET", ""),
-			SupabaseURL:     getEnv("SUPABASE_URL", ""),
-			SupabaseAnonKey: getEnv("SUPABASE_ANON_KEY", ""),
-			SupabaseAPIKey:  getEnv("SUPABASE_SERVICE_KEY", ""),
-		},
-		Processing: ProcessingConfig{
-			MaxFileSize:    maxFileSize,
-			MaxWorkers:     maxWorkers,
-			BatchSize:      batchSize,
-			ProcessTimeout: processTimeout,
-		},
-        OpenSearch: OpenSearchConfig{
-            Host:     getEnv("OPENSEARCH_HOST", getEnv("ES_HOST", getEnv("DO_OPENSEARCH_HOST", ""))), // Prefer OPENSEARCH_*, then ES_*, then DO_OPENSEARCH_*
-            Port:     opensearchPort,
-            Username: getEnv("OPENSEARCH_USERNAME", getEnv("ES_USERNAME", getEnv("DO_OPENSEARCH_USERNAME", ""))),
-            Password: getEnv("OPENSEARCH_PASSWORD", getEnv("ES_PASSWORD", getEnv("DO_OPENSEARCH_PASSWORD", ""))),
-            UseSSL:   getEnvBool("OPENSEARCH_USE_SSL", getEnvBool("ES_USE_SSL", getEnvBool("DO_OPENSEARCH_USE_SSL", true))),
-            Index:    getEnv("OPENSEARCH_INDEX", getEnv("ES_INDEX", getEnv("DO_OPENSEARCH_INDEX", "documents"))),
-        },
-		OpenAI: OpenAIConfig{
-			APIKey: getEnv("OPENAI_API_KEY", ""),
-			Model:  getEnv("OPENAI_MODEL", "gpt-4"),
-		},
-		AI: AIConfig{
-			OpenAI: OpenAIConfig{
-				APIKey: getEnv("OPENAI_API_KEY", ""),
-				Model:  getEnv("OPENAI_MODEL", "gpt-4"),
-			},
-			Claude: ClaudeConfig{
-				APIKey:  getEnv("CLAUDE_API_KEY", ""),
-				Model:   getEnv("CLAUDE_MODEL", "claude-3-sonnet-20240229"),
-				BaseURL: getEnv("CLAUDE_BASE_URL", "https://api.anthropic.com"),
-			},
-			Ollama: OllamaConfig{
-				BaseURL: getEnv("OLLAMA_BASE_URL", "http://localhost:11434"),
-				Model:   getEnv("OLLAMA_MODEL", "gpt-oss:20b"),
-				Timeout: getEnvDuration("OLLAMA_TIMEOUT", 120*time.Second),
-			},
-			EnableFallback: getEnvBool("AI_ENABLE_FALLBACK", true),
-			RetryAttempts:  getEnvInt("AI_RETRY_ATTEMPTS", 3),
-			RetryDelay:     getEnvDuration("AI_RETRY_DELAY", 5*time.Second),
-		},
-        Logging: LoggingConfig{
-            Level:              getEnv("LOG_LEVEL", "info"),
-            Format:             getEnv("LOG_FORMAT", "text"),
-            EnableRequestLog:   getEnvBool("ENABLE_REQUEST_LOGGING", true),
-            EnableErrorDetails: getEnvBool("ENABLE_ERROR_DETAILS", false),
-            EnableStackTrace:   getEnvBool("ENABLE_STACK_TRACE", false),
-        },
-	}
-
-    // Initialize DigitalOcean configuration (always require proper configuration; no local defaults)
-    doConfigInstance, err := doConfig.LoadFromEnvironment()
-    if err != nil {
-        return nil, fmt.Errorf("failed to load DigitalOcean configuration: %w", err)
-    }
-	cfg.DigitalOcean = doConfigInstance
-
-	// Validate required fields
-	if err := cfg.validate(); err != nil {
-		return nil, err
-	}
-
-	return cfg, nil
+	// Use new configuration system with backward compatibility
+	return LoadNew()
 }
 
 func (c *Config) validate() error {

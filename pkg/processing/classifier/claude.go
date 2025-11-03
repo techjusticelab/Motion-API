@@ -36,12 +36,17 @@ func NewClaudeClassifier(config *ClaudeConfig) (Classifier, error) {
 		baseURL = "https://api.anthropic.com"
 	}
 
+	timeout := config.Timeout
+	if timeout == 0 {
+		timeout = 10 * time.Minute // Increased default timeout for LLMs (prevents premature timeouts that waste credits)
+	}
+
 	return &claudeClassifier{
 		apiKey:  config.APIKey,
 		model:   model,
 		baseURL: baseURL,
 		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout: timeout,
 		},
 	}, nil
 }

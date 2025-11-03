@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -146,7 +147,7 @@ func (h *ProcessingHandler) RedactDocument(c *fiber.Ctx) error {
 
 	// Handle multipart form for file upload or JSON for existing document
 	contentType := c.Get("Content-Type")
-	
+
 	if strings.Contains(contentType, "multipart/form-data") {
 		return h.redactUploadedFile(c, ctx)
 	} else {
@@ -347,6 +348,26 @@ func convertInternalRedactionItems(items []internalModels.RedactionItem) []redac
 	return result
 }
 
+func parseProcessOptionsJSON(optionsStr string) (*internalModels.ProcessOptions, error) {
+	opts := internalModels.DefaultProcessOptions()
+
+	decoder := json.NewDecoder(strings.NewReader(strings.TrimSpace(optionsStr)))
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(opts); err != nil {
+		return nil, err
+	}
+
+	if err := decoder.Decode(new(struct{})); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("unexpected additional JSON content")
+		}
+		return nil, err
+	}
+
+	return opts, nil
+}
+
 // ProcessDocument processes a single document upload with timeout and error recovery
 func (h *ProcessingHandler) ProcessDocument(c *fiber.Ctx) error {
 	// Create a timeout context for the entire processing operation
@@ -390,19 +411,26 @@ func (h *ProcessingHandler) ProcessDocument(c *fiber.Ctx) error {
 	// Parse processing options from individual form fields or JSON string
 	var processOptions *internalModels.ProcessOptions
 	if optionsStr := c.FormValue("options"); optionsStr != "" {
-		// TODO: Parse JSON from the options string in future
-		processOptions = internalModels.DefaultProcessOptions()
+		parsedOptions, err := parseProcessOptionsJSON(optionsStr)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(internalModels.NewErrorResponse(
+				"options_parse_error",
+				"Failed to parse processing options",
+				map[string]interface{}{"error": err.Error()},
+			))
+		}
+		processOptions = parsedOptions
 	} else {
 		// Parse individual form fields (priority over defaults)
 		processOptions = &internalModels.ProcessOptions{
-			ExtractText:    c.FormValue("extract_text") != "false",    // Default true, set false only if explicitly "false"
-			ClassifyDoc:    c.FormValue("classify_doc") != "false",    // Default true, set false only if explicitly "false"
-			IndexDocument:  c.FormValue("index_document") != "false",  // Default true, set false only if explicitly "false"
-			StoreDocument:  c.FormValue("store_document") != "false",  // Default true, set false only if explicitly "false"
+			ExtractText:    c.FormValue("extract_text") != "false",   // Default true, set false only if explicitly "false"
+			ClassifyDoc:    c.FormValue("classify_doc") != "false",   // Default true, set false only if explicitly "false"
+			IndexDocument:  c.FormValue("index_document") != "false", // Default true, set false only if explicitly "false"
+			StoreDocument:  c.FormValue("store_document") != "false", // Default true, set false only if explicitly "false"
 			TimeoutSeconds: 120,
 			RetryCount:     1,
 		}
-		
+
 		// Override defaults if explicit values provided
 		if c.FormValue("extract_text") == "false" {
 			processOptions.ExtractText = false
@@ -564,15 +592,15 @@ func (h *ProcessingHandler) processDocumentWithPipeline(ctx context.Context, req
 			ProcessedAt:  time.Now(),
 		},
 	}
-	
+
 	// Add Judge if provided
 	if request.Judge != "" {
 		response.Metadata.Judge = &models.Judge{
 			Name: request.Judge,
 		}
 	}
-	
-	// Add Court if provided  
+
+	// Add Court if provided
 	if request.Court != "" {
 		response.Metadata.Court = &models.CourtInfo{
 			CourtName: request.Court,
@@ -656,15 +684,15 @@ func (h *ProcessingHandler) processDocumentLegacyMode(request *internalModels.Pr
 			ProcessedAt:  time.Now(),
 		},
 	}
-	
+
 	// Add Judge if provided
 	if request.Judge != "" {
 		response.Metadata.Judge = &models.Judge{
 			Name: request.Judge,
 		}
 	}
-	
-	// Add Court if provided  
+
+	// Add Court if provided
 	if request.Court != "" {
 		response.Metadata.Court = &models.CourtInfo{
 			CourtName: request.Court,
@@ -830,7 +858,7 @@ func (h *ProcessingHandler) processDocumentLegacyMode(request *internalModels.Pr
 				Name: request.Judge,
 			}
 		}
-		
+
 		if request.Court != "" {
 			indexDoc.Metadata.Court = &models.CourtInfo{
 				CourtName: request.Court,

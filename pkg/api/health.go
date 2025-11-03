@@ -2,14 +2,22 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/mem"
+
+	"motion-index-fiber/pkg/search"
+	"motion-index-fiber/pkg/storage"
 )
 
-type HealthService struct{}
+type HealthService struct {
+	searchSvc  search.Service
+	storageSvc storage.Service
+}
 
 type HealthResponse struct {
 	Status      string                 `json:"status"`
@@ -38,11 +46,18 @@ type SystemInfo struct {
 
 var startTime = time.Now()
 
-func NewHealthService() *HealthService {
-	return &HealthService{}
+func NewHealthService(storageSvc storage.Service, searchSvc search.Service) *HealthService {
+	return &HealthService{
+		searchSvc:  searchSvc,
+		storageSvc: storageSvc,
+	}
 }
 
 func (h *HealthService) GetHealth(ctx context.Context, includeDetails bool) (*HealthResponse, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	response := &HealthResponse{
 		Status:      "ok",
 		Timestamp:   time.Now(),
@@ -61,18 +76,14 @@ func (h *HealthService) GetHealth(ctx context.Context, includeDetails bool) (*He
 		// Check service dependencies
 		services := make(map[string]ServiceInfo)
 
-		// TODO: Add actual service checks
-		services["opensearch"] = ServiceInfo{
-			Status:  "ok",
-			Message: "Connected to OpenSearch cluster",
-		}
-
-		services["storage"] = ServiceInfo{
-			Status:  "ok",
-			Message: "DigitalOcean Spaces accessible",
-		}
+		services["opensearch"] = h.checkSearchService(ctx)
+		services["storage"] = h.checkStorageService()
 
 		response.Services = services
+
+		if isDegraded(services) {
+			response.Status = "degraded"
+		}
 	}
 
 	return response, nil
@@ -99,4 +110,106 @@ func (h *HealthService) getSystemInfo(ctx context.Context) (*SystemInfo, error) 
 		Goroutines:  runtime.NumGoroutine(),
 		GoVersion:   runtime.Version(),
 	}, nil
+}
+
+func (h *HealthService) checkSearchService(ctx context.Context) ServiceInfo {
+	if h.searchSvc == nil {
+		return ServiceInfo{
+			Status:  "unavailable",
+			Message: "Search service not configured",
+		}
+	}
+
+	healthCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	status, err := h.searchSvc.Health(healthCtx)
+	responseTime := time.Since(start)
+
+	if err != nil {
+		return ServiceInfo{
+			Status:       "error",
+			ResponseTime: responseTime,
+			Message:      fmt.Sprintf("OpenSearch health check failed: %v", err),
+		}
+	}
+
+	if status == nil {
+		return ServiceInfo{
+			Status:       "error",
+			ResponseTime: responseTime,
+			Message:      "OpenSearch health check returned no status",
+		}
+	}
+
+	messageBuilder := strings.Builder{}
+	messageBuilder.WriteString("Cluster healthy")
+	if status.ClusterName != "" {
+		messageBuilder.WriteString(fmt.Sprintf(" (%s)", status.ClusterName))
+	}
+
+	serviceInfo := ServiceInfo{
+		Status:       "ok",
+		ResponseTime: responseTime,
+		Message:      messageBuilder.String(),
+	}
+
+	if !status.IndexExists {
+		serviceInfo.Status = "degraded"
+		serviceInfo.Message = "OpenSearch index missing"
+		return serviceInfo
+	}
+
+	if status.IndexHealth != "" {
+		indexHealth := strings.ToLower(status.IndexHealth)
+		switch indexHealth {
+		case "green":
+			serviceInfo.Message = fmt.Sprintf("Index health: %s", status.IndexHealth)
+		case "yellow":
+			serviceInfo.Status = "degraded"
+			serviceInfo.Message = "Index health: yellow"
+		default:
+			serviceInfo.Status = "error"
+			serviceInfo.Message = fmt.Sprintf("Index health: %s", status.IndexHealth)
+		}
+	}
+
+	return serviceInfo
+}
+
+func (h *HealthService) checkStorageService() ServiceInfo {
+	if h.storageSvc == nil {
+		return ServiceInfo{
+			Status:  "unavailable",
+			Message: "Storage service not configured",
+		}
+	}
+
+	start := time.Now()
+	healthy := h.storageSvc.IsHealthy()
+	responseTime := time.Since(start)
+
+	if healthy {
+		return ServiceInfo{
+			Status:       "ok",
+			ResponseTime: responseTime,
+			Message:      "Storage service healthy",
+		}
+	}
+
+	return ServiceInfo{
+		Status:       "error",
+		ResponseTime: responseTime,
+		Message:      "Storage service reported unhealthy",
+	}
+}
+
+func isDegraded(services map[string]ServiceInfo) bool {
+	for _, service := range services {
+		if service.Status != "ok" {
+			return true
+		}
+	}
+	return false
 }

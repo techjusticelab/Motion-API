@@ -66,6 +66,59 @@ Motion-Index Fiber is a high-performance legal document processing API built wit
 - **`pkg/models/`**: Core data models (document, legal, search, time)
 - **`pkg/monitoring/`**: Metrics collection and monitoring
 
+## Domain Layer (SOLID Redesign)
+
+### Document Aggregate & Value Objects
+- `internal/domain/document` now contains the rich document aggregate, functional creation options, and domain events. Use value objects (`DocumentID`, `FilePath`, `ContentType`, `Hash`, etc.) for validation and invariants.
+- Example:
+  ```go
+  doc, err := document.NewDocument(
+      document.WithID("doc_123"),
+      document.WithFileName("motion.pdf"),
+      document.WithStoragePath("documents/2024/05/motion.pdf"),
+      document.WithContentType("application/pdf"),
+      document.WithHash(hashValue, "SHA256"),
+      document.WithFileSize(2048),
+      document.WithText("Motion to suppress evidence"),
+  )
+  if err != nil {
+      log.Fatal(err)
+  }
+  ```
+
+### Legal Domain Entities
+- `internal/domain/legal` introduces DDD-style entities for cases, courts, parties, and attorneys with validation (`ErrInvalidCaseNumber`, `ErrInvalidPartyRole`, `ErrInvalidBarNumber`).
+- Example:
+  ```go
+  caseNumber, _ := legal.NewCaseNumber("2024-CR-12345")
+  legalCase, _ := legal.NewCase(caseNumber, "State v. Doe", legal.WithCaseType("criminal"))
+  party, _ := legal.NewParty("John Doe", "defendant")
+  legalCase.AddParty(party)
+  ```
+
+### Classification Service Contracts
+- `internal/domain/classification` defines the domain service interface plus the `Result` value object used by the document aggregate.
+- Example:
+  ```go
+  docType, _ := document.NewDocumentType("motion")
+  category, _ := document.NewCategory("filing")
+  confidence, _ := document.NewConfidence(0.92)
+  result, _ := classification.NewResult(docType, category, confidence, "classifier", []string{"motion"}, "")
+  docClassification, _ := result.ToDocumentClassification()
+  _ = existingDoc.ApplyClassification(docClassification)
+  ```
+
+### Domain Layer Testing
+- Run the full domain suite with coverage: `go test ./internal/domain/... -cover`
+- Unit tests exercise every branch of document options, legal entity validation, and classification helpers to guarantee 100% statement coverage.
+
+## Application Layer
+
+- Ports live under `internal/application/ports` (repositories, services, event bus) and keep use cases infrastructure-agnostic.
+- DTOs with validation helpers sit in `internal/application/dto`; they call `Validate()` to reuse domain value-object checks.
+- Document-oriented use cases currently include processing (`usecase/document/process.go`), classification (`usecase/document/classify.go`), and search (`usecase/document/search.go`), all of which orchestrate domain aggregates, call ports, and publish emitted events where relevant.
+- Shared validation utilities are in `internal/application/validation` with complete unit test coverage.
+
 ## Enhanced Date Extraction and Classification System
 
 ### Multi-Model AI Classification

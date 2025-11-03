@@ -380,6 +380,24 @@ func (p *indexingProcessor) ProcessWithFullResult(ctx context.Context, req *Proc
 	// Add storage metadata
 	if storagePath, exists := req.Metadata["storage_path"]; exists {
 		doc.FilePath = storagePath
+		// Generate S3 URI in the format: s3://bucket-name/path
+		// Note: In a production system, we'd get bucket name from configuration
+		// For now, we'll extract it from the storage URL if available
+		if storageURL, urlExists := req.Metadata["storage_url"]; urlExists {
+			// Try to extract bucket name from URL like: https://bucket.region.digitaloceanspaces.com/path
+			if idx := strings.Index(storageURL, ".digitaloceanspaces.com/"); idx > 0 {
+				// Extract bucket name from URL
+				bucketPart := storageURL[8:idx] // Skip "https://"
+				if dotIdx := strings.Index(bucketPart, "."); dotIdx > 0 {
+					bucketName := bucketPart[:dotIdx]
+					doc.S3URI = fmt.Sprintf("s3://%s/%s", bucketName, storagePath)
+				}
+			}
+		}
+		// Fallback: if we couldn't extract bucket name, use path only
+		if doc.S3URI == "" {
+			doc.S3URI = fmt.Sprintf("s3://unknown-bucket/%s", storagePath)
+		}
 	}
 	if storageURL, exists := req.Metadata["storage_url"]; exists {
 		doc.FileURL = storageURL
@@ -431,17 +449,20 @@ func NewStorageProcessor(service storage.Service) Processor {
 }
 
 // Process executes document storage
+// NOTE: This is a simplified processor that generates storage metadata.
+// Actual file upload happens in the handler layer to avoid io.Reader consumption issues.
 func (p *storageProcessor) Process(ctx context.Context, req *ProcessRequest) (*ProcessResult, error) {
 	if p.service == nil {
 		return nil, fmt.Errorf("storage service not available")
 	}
 
-	// Generate storage path
+	// Generate storage path where the document will be/is stored
 	storagePath := p.generateStoragePath(req.FileName, req.ID)
 
-	// Store document (this is a placeholder implementation)
-	// In a real implementation, you would upload the document to storage
-	url := fmt.Sprintf("https://storage.example.com/%s", storagePath)
+	// Generate the public URL (this matches what SpacesService.GetURL() returns)
+	// Note: In production, bucket and region should come from configuration
+	// For now, we'll use a placeholder that will be replaced by the actual storage URL
+	url := p.service.GetURL(storagePath)
 
 	return &ProcessResult{
 		ID: req.ID,

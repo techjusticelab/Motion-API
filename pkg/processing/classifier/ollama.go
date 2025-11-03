@@ -33,7 +33,7 @@ func NewOllamaClassifier(config *OllamaConfig) (Classifier, error) {
 
 	timeout := config.Timeout
 	if timeout == 0 {
-		timeout = 120 * time.Second
+		timeout = 10 * time.Minute // Increased default timeout for LLMs (prevents premature timeouts)
 	}
 
 	return &ollamaClassifier{
