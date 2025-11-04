@@ -4,12 +4,16 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"motion-index-fiber/internal/config"
 	"motion-index-fiber/internal/handlers/storage"
+	pkgextractor "motion-index-fiber/pkg/processing/extractor"
+	pkgsearch "motion-index-fiber/pkg/search"
 	pkgstorage "motion-index-fiber/pkg/storage"
 )
 
 type StorageHandler struct {
 	cfg               *config.Config
 	storage           pkgstorage.Service
+	search            pkgsearch.Service
+	extractor         pkgextractor.Service
 	listHandler       *storage.ListHandler
 	countHandler      *storage.CountHandler
 	serveHandler      *storage.ServeHandler
@@ -18,15 +22,17 @@ type StorageHandler struct {
 	refactoredHandler *storage.RefactoredHandler
 }
 
-func NewStorageHandler(cfg *config.Config, storageService pkgstorage.Service) *StorageHandler {
+func NewStorageHandler(cfg *config.Config, storageService pkgstorage.Service, searchService pkgsearch.Service, extractorService pkgextractor.Service) *StorageHandler {
 	return &StorageHandler{
 		cfg:               cfg,
 		storage:           storageService,
+		search:            searchService,
+		extractor:         extractorService,
 		listHandler:       storage.NewListHandler(cfg, storageService),
 		countHandler:      storage.NewCountHandler(cfg, storageService),
 		serveHandler:      storage.NewServeHandler(cfg, storageService),
 		searchHandler:     storage.NewSearchHandler(cfg, storageService),
-		uploadHandler:     storage.NewUploadHandler(cfg, storageService),
+		uploadHandler:     storage.NewUploadHandler(cfg, storageService, extractorService, searchService),
 		refactoredHandler: storage.NewRefactoredHandler(storageService),
 	}
 }
@@ -54,6 +60,10 @@ func (h *StorageHandler) FindDocumentsByName(c *fiber.Ctx) error {
 // UploadDocumentToS3 delegates to the upload handler
 func (h *StorageHandler) UploadDocumentToS3(c *fiber.Ctx) error {
 	return h.uploadHandler.UploadDocumentToS3(c)
+}
+
+func (h *StorageHandler) UploadDocumentAndIndex(c *fiber.Ctx) error {
+	return h.uploadHandler.UploadDocumentAndIndex(c)
 }
 
 // SetRefactoredHandler allows setting the DDD-based handler when use cases are available

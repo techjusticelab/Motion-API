@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/xml"
+	"errors"
 	"io"
 	"sort"
 	"strings"
@@ -35,13 +36,26 @@ func (e *pptxExtractor) Extract(ctx context.Context, reader io.Reader, metadata 
 		return nil, NewExtractionError("pptx", "failed to extract text from PPTX slides", err)
 	}
 
+	usedFallback := false
+	if strings.TrimSpace(text) == "" {
+		fallback, convErr := convertWithLibreOffice(ctx, content, "pptx")
+		if strings.TrimSpace(fallback) == "" {
+			if convErr != nil {
+				return nil, NewExtractionError("pptx", "failed to convert PPTX to text", convErr)
+			}
+			return nil, NewExtractionError("pptx", "no text extracted from PPTX document", errors.New("empty text content"))
+		}
+		text = fallback
+		usedFallback = true
+	}
+
 	cleaner := NewTextCleaner(DefaultCleaningConfig())
 	text = cleaner.CleanText(text)
 
 	wordCount := countWords(text)
 	charCount := len(text)
 
-	return &ExtractionResult{
+	result := &ExtractionResult{
 		Text:      text,
 		WordCount: wordCount,
 		CharCount: charCount,
@@ -51,7 +65,13 @@ func (e *pptxExtractor) Extract(ctx context.Context, reader io.Reader, metadata 
 			"format":    "pptx",
 			"file_size": len(content),
 		},
-	}, nil
+	}
+
+	if usedFallback {
+		result.Metadata["conversion_tool"] = "libreoffice"
+	}
+
+	return result, nil
 }
 
 // SupportedFormats returns supported formats for PPTX extractor

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/xml"
+	"errors"
 	"io"
 	"strings"
 )
@@ -37,6 +38,19 @@ func (e *docxExtractor) Extract(ctx context.Context, reader io.Reader, metadata 
 		return nil, NewExtractionError("docx", "failed to extract text from DOCX", err)
 	}
 
+	usedFallback := false
+	if strings.TrimSpace(text) == "" {
+		fallback, convErr := convertWithLibreOffice(ctx, content, "docx")
+		if strings.TrimSpace(fallback) == "" {
+			if convErr != nil {
+				return nil, NewExtractionError("docx", "failed to convert DOCX to text", convErr)
+			}
+			return nil, NewExtractionError("docx", "no text extracted from DOCX document", errors.New("empty text content"))
+		}
+		text = fallback
+		usedFallback = true
+	}
+
 	// Clean up the text using enhanced cleaner
 	cleaner := NewTextCleaner(DefaultCleaningConfig())
 	text = cleaner.CleanText(text)
@@ -48,7 +62,7 @@ func (e *docxExtractor) Extract(ctx context.Context, reader io.Reader, metadata 
 	// Get document properties
 	props := e.getDocumentProperties(zipReader)
 
-	return &ExtractionResult{
+	result := &ExtractionResult{
 		Text:      text,
 		WordCount: wordCount,
 		CharCount: charCount,
@@ -58,7 +72,13 @@ func (e *docxExtractor) Extract(ctx context.Context, reader io.Reader, metadata 
 			"file_size":  len(content),
 			"properties": props,
 		},
-	}, nil
+	}
+
+	if usedFallback {
+		result.Metadata["conversion_tool"] = "libreoffice"
+	}
+
+	return result, nil
 }
 
 // SupportedFormats returns the formats this extractor supports

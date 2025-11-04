@@ -26,7 +26,7 @@ func (e *docExtractor) Extract(ctx context.Context, reader io.Reader, metadata *
 		return nil, NewExtractionError("doc", "failed to read DOC document", err)
 	}
 
-	text, err := e.extractText(content)
+	text, err := e.extractText(ctx, content)
 	if err != nil {
 		return nil, NewExtractionError("doc", "failed to extract text from DOC document", err)
 	}
@@ -70,7 +70,7 @@ func (e *docExtractor) CanExtract(format string) bool {
 	return false
 }
 
-func (e *docExtractor) extractText(content []byte) (string, error) {
+func (e *docExtractor) extractText(ctx context.Context, content []byte) (string, error) {
 	trimmed := bytes.TrimSpace(content)
 	if len(trimmed) == 0 {
 		return "", nil
@@ -78,6 +78,13 @@ func (e *docExtractor) extractText(content []byte) (string, error) {
 
 	if bytes.HasPrefix(trimmed, []byte("{\\rtf")) {
 		return extractTextFromRTF(trimmed), nil
+	}
+
+	if isOLEDocument(content) {
+		text, err := convertWithLibreOffice(ctx, content, "doc")
+		if err == nil && strings.TrimSpace(text) != "" {
+			return text, nil
+		}
 	}
 
 	text := decodeUTF16LE(content)
@@ -90,6 +97,13 @@ func (e *docExtractor) extractText(content []byte) (string, error) {
 	}
 
 	return "", errors.New("unsupported DOC encoding")
+}
+
+func isOLEDocument(content []byte) bool {
+	if len(content) < 8 {
+		return false
+	}
+	return bytes.HasPrefix(content, []byte{0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1})
 }
 
 func extractTextFromRTF(content []byte) string {

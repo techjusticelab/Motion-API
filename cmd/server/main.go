@@ -21,6 +21,7 @@ import (
 	"motion-index-fiber/internal/handlers/opensearch"
 	"motion-index-fiber/internal/middleware"
 	"motion-index-fiber/pkg/cloud/digitalocean"
+	pkgextractor "motion-index-fiber/pkg/processing/extractor"
 )
 
 func main() {
@@ -35,11 +36,17 @@ func main() {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
+	bodyLimit := 0
+	if cfg.Server.MaxRequestSize > 0 {
+		bodyLimit = int(cfg.Server.MaxRequestSize)
+	}
+
 	// Create Fiber app
 	app := fiber.New(fiber.Config{
 		ServerHeader: "Motion-Index-Fiber",
 		AppName:      "Motion Index API v1.0",
 		ErrorHandler: middleware.ErrorHandler,
+		BodyLimit:    bodyLimit,
 	})
 
 	// Global middleware with enhanced panic recovery
@@ -132,6 +139,13 @@ func main() {
 
 	opensearchHandler := opensearch.NewHandler(opensearchService)
 
+	dryStorageService, err := doFactory.CreateStorageService()
+	if err != nil {
+		log.Fatalf("Failed to create storage service for dry classification: %v", err)
+	}
+	dryExtractor := pkgextractor.NewService()
+	dryHandler := opensearch.NewDryClassificationHandler(cfg, dryStorageService, opensearchService, dryExtractor)
+
 	// Health endpoints
 	app.Get("/", h.Health.Root)
 	app.Get("/health", h.Health.Health)
@@ -139,15 +153,26 @@ func main() {
 	// API routes
 	api := app.Group("/api/v1")
 
+	// Health check under API v1 for consistency
+	api.Get("/health", h.Health.Health)
+
 	// File upload endpoint
 	api.Post("/upload/s3", h.Storage.UploadDocumentToS3)
+
+	// Nested upload routes for dry classification
+	uploadGroup := api.Group("/upload")
+	uploadS3Group := uploadGroup.Group("/s3")
+	uploadS3OsGroup := uploadS3Group.Group("/os")
+	uploadS3OsGroup.Post("/dry-classification", dryHandler.Run)
 
 	// Public routes
 	api.Post("/categorise", h.Processing.UploadDocument)
 	api.Post("/analyze-redactions", h.Processing.AnalyzeRedactions)
 	api.Post("/redact-document", h.Processing.RedactDocument)
 	api.Post("/search", h.Search.SearchDocuments)
-	api.Post("/os/push", opensearchHandler.PushDocument)
+	osRoutes := api.Group("/os")
+	osRoutes.Post("/push", opensearchHandler.PushDocument)
+	osRoutes.Post("/dry-classification", dryHandler.Run)
 	api.Get("/legal-tags", h.Search.GetLegalTags)
 	api.Get("/document-types", h.Search.GetDocumentTypes)
 	api.Get("/document-stats", h.Search.GetDocumentStats)

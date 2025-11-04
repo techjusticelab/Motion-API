@@ -96,7 +96,7 @@ func runUpload(args []string) error {
 		defaultTimeout = 5 * time.Minute
 	}
 
-    defaultMaxSize := envByteSize("MASS_UPLOAD_MAX_SIZE", 100*1024*1024)
+	defaultMaxSize := envByteSize("MASS_UPLOAD_MAX_SIZE", 100*1024*1024)
 	if defaultMaxSize < 0 {
 		defaultMaxSize = 50 * 1024 * 1024
 	}
@@ -146,7 +146,7 @@ func runUpload(args []string) error {
 	if err != nil {
 		return fmt.Errorf("invalid max-size value %q: %w", *maxSizeFlag, err)
 	}
-    if maxSizeBytes <= 0 {
+	if maxSizeBytes <= 0 {
 		maxSizeBytes = defaultMaxSize
 	}
 
@@ -195,6 +195,11 @@ func runUpload(args []string) error {
 	endpointURL := strings.TrimSpace(*endpoint)
 	if endpointURL == "" {
 		endpointURL = defaultEndpoint
+	}
+
+	// If endpoint looks like it's targeting the dry-classification route, update it
+	if strings.Contains(endpointURL, "/os/dry-classification") && !strings.Contains(endpointURL, "/upload/s3/os/dry-classification") {
+		endpointURL = strings.Replace(endpointURL, "/os/dry-classification", "/upload/s3/os/dry-classification", 1)
 	}
 
 	client := &http.Client{Timeout: httpTimeout}
@@ -430,11 +435,14 @@ func buildDefaultEndpoint() string {
 	}
 
 	base = strings.TrimRight(base, "/")
-	if strings.HasSuffix(base, "/upload/s3") {
+	if strings.HasSuffix(base, "/upload/s3/os/dry-classification") {
 		return base
 	}
+	if strings.HasSuffix(base, "/upload/s3") {
+		return base + "/os/dry-classification"
+	}
 
-	return base + "/upload/s3"
+	return base + "/upload/s3/os/dry-classification"
 }
 
 func envInt(key string, fallback int) int {
@@ -506,7 +514,7 @@ func printUploadUsage(fs *flag.FlagSet) {
 	fmt.Println()
 	fmt.Println("Environment overrides:")
 	fmt.Println("  MASS_UPLOAD_ENDPOINT          - Full upload endpoint")
-	fmt.Println("  MASS_UPLOAD_API_BASE_URL      - Base API URL combined with /upload/s3")
+	fmt.Println("  MASS_UPLOAD_API_BASE_URL      - Base API URL combined with /upload/s3 or /upload/s3/os/dry-classification")
 	fmt.Println("  MASS_UPLOAD_CONCURRENCY       - Default concurrency")
 	fmt.Println("  MASS_UPLOAD_RETRIES           - Default retry attempts")
 	fmt.Println("  MASS_UPLOAD_RETRY_DELAY       - Default retry delay (duration or seconds)")

@@ -74,7 +74,7 @@ func New(cfg *config.Config) (*Handlers, error) {
 		Health:     NewHealthHandler(storageService, searchService),
 		Processing: NewProcessingHandler(cfg, processingPipeline, storageService, searchService),
 		Search:     NewSearchHandler(cfg, searchService),
-		Storage:    NewStorageHandler(cfg, storageService),
+		Storage:    NewStorageHandler(cfg, storageService, searchService, extractorService),
 		Indexing:   NewIndexingHandler(cfg, searchService),
 	}, nil
 }

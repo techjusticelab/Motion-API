@@ -18,6 +18,6 @@ func UploadFile(client *http.Client, endpoint, filePath, fileName string) error 
 		return err
 	}
 
-	_, err = doRequest(client, req, http.StatusOK, http.StatusPartialContent)
+	_, err = doRequest(client, req, http.StatusCreated, http.StatusOK, http.StatusPartialContent)
 	return err
 }
