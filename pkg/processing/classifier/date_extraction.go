@@ -7,14 +7,12 @@ import (
 	"time"
 )
 
-// DateRange represents a range of dates for multi-day events
 type DateRange struct {
 	StartDate *string `json:"start_date"`
 	EndDate   *string `json:"end_date"`
 	Type      string  `json:"type"` // "hearing_period", "trial_dates", etc.
 }
 
-// DateExtractionResult contains all extracted date information
 type DateExtractionResult struct {
 	FilingDate   *string     `json:"filing_date,omitempty"`
 	EventDate    *string     `json:"event_date,omitempty"`
@@ -24,51 +22,46 @@ type DateExtractionResult struct {
 	DateRanges   []DateRange `json:"date_ranges,omitempty"`
 }
 
-// Common date formats found in legal documents
 var dateFormats = []string{
-	"2006-01-02",           // ISO format
-	"01/02/2006",           // MM/DD/YYYY
-	"1/2/2006",             // M/D/YYYY
-	"January 2, 2006",      // Month D, YYYY
-	"Jan 2, 2006",          // Mon D, YYYY
-	"January 02, 2006",     // Month DD, YYYY
-	"Jan 02, 2006",         // Mon DD, YYYY
-	"02 January 2006",      // DD Month YYYY
-	"2 January 2006",       // D Month YYYY
-	"02-Jan-2006",          // DD-Mon-YYYY
-	"2-Jan-2006",           // D-Mon-YYYY
-	"2006/01/02",           // YYYY/MM/DD
-	"2006-1-2",             // YYYY-M-D
-	"01-02-2006",           // MM-DD-YYYY
-	"1-2-2006",             // M-D-YYYY
+	"2006-01-02",       // ISO format
+	"01/02/2006",       // MM/DD/YYYY
+	"1/2/2006",         // M/D/YYYY
+	"January 2, 2006",  // Month D, YYYY
+	"Jan 2, 2006",      // Mon D, YYYY
+	"January 02, 2006", // Month DD, YYYY
+	"Jan 02, 2006",     // Mon DD, YYYY
+	"02 January 2006",  // DD Month YYYY
+	"2 January 2006",   // D Month YYYY
+	"02-Jan-2006",      // DD-Mon-YYYY
+	"2-Jan-2006",       // D-Mon-YYYY
+	"2006/01/02",       // YYYY/MM/DD
+	"2006-1-2",         // YYYY-M-D
+	"01-02-2006",       // MM-DD-YYYY
+	"1-2-2006",         // M-D-YYYY
 }
 
-// Partial date formats (month/year only)
 var partialDateFormats = []string{
-	"January 2006",         // Month YYYY
-	"Jan 2006",             // Mon YYYY
-	"01/2006",              // MM/YYYY
-	"1/2006",               // M/YYYY
-	"2006-01",              // YYYY-MM
-	"2006/01",              // YYYY/MM
+	"January 2006", // Month YYYY
+	"Jan 2006",     // Mon YYYY
+	"01/2006",      // MM/YYYY
+	"1/2006",       // M/YYYY
+	"2006-01",      // YYYY-MM
+	"2006/01",      // YYYY/MM
 }
 
-// Date extraction patterns for different contexts
 var datePatterns = map[string]*regexp.Regexp{
-	"filing_date": regexp.MustCompile(`(?i)(?:filed|filing|file date|date filed)(?:\s+on)?\s*:?\s*([^,\n\r;]+)`),
-	"event_date":  regexp.MustCompile(`(?i)(?:on or about|incident|occurred|violation|event)(?:\s+on)?\s*:?\s*([^,\n\r;]+)`),
-	"hearing_date": regexp.MustCompile(`(?i)(?:hearing|scheduled|arraignment|calendar)(?:\s+(?:set|on|for))?\s*:?\s*([^,\n\r;]+)`),
+	"filing_date":   regexp.MustCompile(`(?i)(?:filed|filing|file date|date filed)(?:\s+on)?\s*:?\s*([^,\n\r;]+)`),
+	"event_date":    regexp.MustCompile(`(?i)(?:on or about|incident|occurred|violation|event)(?:\s+on)?\s*:?\s*([^,\n\r;]+)`),
+	"hearing_date":  regexp.MustCompile(`(?i)(?:hearing|scheduled|arraignment|calendar)(?:\s+(?:set|on|for))?\s*:?\s*([^,\n\r;]+)`),
 	"decision_date": regexp.MustCompile(`(?i)(?:decided|ruling|ordered|judgment|entered)(?:\s+on)?\s*:?\s*([^,\n\r;]+)`),
-	"served_date": regexp.MustCompile(`(?i)(?:served|service)(?:\s+on)?\s*:?\s*([^,\n\r;]+)`),
+	"served_date":   regexp.MustCompile(`(?i)(?:served|service)(?:\s+on)?\s*:?\s*([^,\n\r;]+)`),
 }
 
-// DateExtractor provides date extraction and validation functionality
 type DateExtractor struct {
 	currentYear int
 	timezone    *time.Location
 }
 
-// NewDateExtractor creates a new date extractor
 func NewDateExtractor() *DateExtractor {
 	loc, _ := time.LoadLocation("America/Los_Angeles") // Pacific timezone for California courts
 	return &DateExtractor{
@@ -77,7 +70,6 @@ func NewDateExtractor() *DateExtractor {
 	}
 }
 
-// ExtractDatesFromText attempts to extract all date types from the given text
 func (de *DateExtractor) ExtractDatesFromText(text string) *DateExtractionResult {
 	result := &DateExtractionResult{}
 
@@ -94,7 +86,6 @@ func (de *DateExtractor) ExtractDatesFromText(text string) *DateExtractionResult
 	return result
 }
 
-// extractDateByType extracts a specific type of date from text
 func (de *DateExtractor) extractDateByType(text, dateType string) *string {
 	pattern, exists := datePatterns[dateType]
 	if !exists {
@@ -116,11 +107,10 @@ func (de *DateExtractor) extractDateByType(text, dateType string) *string {
 	return parsedDate
 }
 
-// parseAndValidateDate attempts to parse a date string and validate it
 func (de *DateExtractor) parseAndValidateDate(dateStr, dateType string) *string {
 	// Clean the date string
 	dateStr = de.cleanDateString(dateStr)
-	
+
 	// Try full date formats first
 	if parsed := de.tryParseFullDate(dateStr); parsed != nil {
 		if de.validateDate(*parsed, dateType) {
@@ -145,22 +135,20 @@ func (de *DateExtractor) parseAndValidateDate(dateStr, dateType string) *string 
 	return nil
 }
 
-// cleanDateString cleans and normalizes a date string
 func (de *DateExtractor) cleanDateString(dateStr string) string {
 	// Remove common prefixes and suffixes
 	dateStr = regexp.MustCompile(`(?i)^(?:on\s+|at\s+|the\s+)`).ReplaceAllString(dateStr, "")
 	dateStr = regexp.MustCompile(`(?i)\s+(?:at\s+.*|,\s+at\s+.*)$`).ReplaceAllString(dateStr, "")
-	
+
 	// Remove time information
 	dateStr = regexp.MustCompile(`\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AaPp][Mm])?`).ReplaceAllString(dateStr, "")
-	
+
 	// Normalize whitespace
 	dateStr = regexp.MustCompile(`\s+`).ReplaceAllString(strings.TrimSpace(dateStr), " ")
-	
+
 	return dateStr
 }
 
-// tryParseFullDate attempts to parse a complete date
 func (de *DateExtractor) tryParseFullDate(dateStr string) *string {
 	for _, format := range dateFormats {
 		if t, err := time.Parse(format, dateStr); err == nil {
@@ -171,7 +159,6 @@ func (de *DateExtractor) tryParseFullDate(dateStr string) *string {
 	return nil
 }
 
-// tryParsePartialDate attempts to parse a partial date (month/year only)
 func (de *DateExtractor) tryParsePartialDate(dateStr string) *string {
 	for _, format := range partialDateFormats {
 		if t, err := time.Parse(format, dateStr); err == nil {
@@ -184,51 +171,49 @@ func (de *DateExtractor) tryParsePartialDate(dateStr string) *string {
 	return nil
 }
 
-// tryParseRelativeDate attempts to parse relative dates like "tomorrow", "next Monday"
 func (de *DateExtractor) tryParseRelativeDate(dateStr string) *string {
 	lower := strings.ToLower(dateStr)
 	now := time.Now().In(de.timezone)
-	
+
 	switch {
 	case strings.Contains(lower, "today"):
 		formatted := now.Format("2006-01-02")
 		return &formatted
-		
+
 	case strings.Contains(lower, "tomorrow"):
 		tomorrow := now.AddDate(0, 0, 1)
 		formatted := tomorrow.Format("2006-01-02")
 		return &formatted
-		
+
 	case strings.Contains(lower, "yesterday"):
 		yesterday := now.AddDate(0, 0, -1)
 		formatted := yesterday.Format("2006-01-02")
 		return &formatted
-		
+
 	case strings.Contains(lower, "next week"):
 		nextWeek := now.AddDate(0, 0, 7)
 		formatted := nextWeek.Format("2006-01-02")
 		return &formatted
-		
+
 	case strings.Contains(lower, "last week"):
 		lastWeek := now.AddDate(0, 0, -7)
 		formatted := lastWeek.Format("2006-01-02")
 		return &formatted
-		
+
 	case strings.Contains(lower, "next month"):
 		nextMonth := now.AddDate(0, 1, 0)
 		formatted := nextMonth.Format("2006-01-02")
 		return &formatted
-		
+
 	default:
 		// Try to parse relative weekdays like "next Monday"
 		return de.parseRelativeWeekday(dateStr, now)
 	}
 }
 
-// parseRelativeWeekday parses relative weekday references
 func (de *DateExtractor) parseRelativeWeekday(dateStr string, baseDate time.Time) *string {
 	lower := strings.ToLower(dateStr)
-	
+
 	weekdays := map[string]time.Weekday{
 		"sunday": time.Sunday, "monday": time.Monday, "tuesday": time.Tuesday,
 		"wednesday": time.Wednesday, "thursday": time.Thursday,
@@ -236,7 +221,7 @@ func (de *DateExtractor) parseRelativeWeekday(dateStr string, baseDate time.Time
 		"sun": time.Sunday, "mon": time.Monday, "tue": time.Tuesday,
 		"wed": time.Wednesday, "thu": time.Thursday, "fri": time.Friday, "sat": time.Saturday,
 	}
-	
+
 	for dayName, weekday := range weekdays {
 		if strings.Contains(lower, dayName) {
 			// Calculate days until the target weekday
@@ -255,76 +240,74 @@ func (de *DateExtractor) parseRelativeWeekday(dateStr string, baseDate time.Time
 					daysUntil += 7
 				}
 			}
-			
+
 			targetDate := baseDate.AddDate(0, 0, daysUntil)
 			formatted := targetDate.Format("2006-01-02")
 			return &formatted
 		}
 	}
-	
+
 	return nil
 }
 
-// validateDate validates that a parsed date is reasonable for the given date type
 func (de *DateExtractor) validateDate(dateStr, dateType string) bool {
 	t, err := time.Parse("2006-01-02", dateStr)
 	if err != nil {
 		return false
 	}
-	
+
 	now := time.Now()
-	
+
 	// General validation: reasonable year range for legal documents
 	if t.Year() < 1950 || t.Year() > now.Year()+10 {
 		return false
 	}
-	
+
 	// Type-specific validation
 	switch dateType {
 	case "filing_date":
 		// Filing dates should not be in the future (with small tolerance)
 		return t.Before(now.AddDate(0, 0, 1))
-		
+
 	case "event_date":
 		// Event dates can be past, present, or reasonable future
-		return t.After(time.Date(1950, 1, 1, 0, 0, 0, 0, time.UTC)) && 
-			   t.Before(now.AddDate(10, 0, 0))
-		
+		return t.After(time.Date(1950, 1, 1, 0, 0, 0, 0, time.UTC)) &&
+			t.Before(now.AddDate(10, 0, 0))
+
 	case "hearing_date":
 		// Hearing dates are typically in the future
 		return t.After(now.AddDate(0, 0, -30)) && // Allow some past hearings
-			   t.Before(now.AddDate(5, 0, 0))     // Reasonable future limit
-		
+			t.Before(now.AddDate(5, 0, 0)) // Reasonable future limit
+
 	case "decision_date":
 		// Decision dates should not be far in the future
 		return t.Before(now.AddDate(0, 0, 30))
-		
+
 	case "served_date":
 		// Service dates should not be in the future
 		return t.Before(now.AddDate(0, 0, 1))
-		
+
 	default:
 		return true
 	}
 }
 
-// extractDateRanges extracts date ranges for multi-day events
 func (de *DateExtractor) extractDateRanges(text string) []DateRange {
 	ranges := []DateRange{}
-	
+
 	// Pattern for date ranges like "January 1-3, 2024" or "1/1/2024 to 1/3/2024"
 	rangePattern := regexp.MustCompile(`(?i)(?:from\s+)?(\w+\s+\d{1,2}(?:st|nd|rd|th)?)\s*[-–—]\s*(\d{1,2}(?:st|nd|rd|th)?),?\s+(\d{4})|(\d{1,2}\/\d{1,2}\/\d{4})\s+(?:to|through|thru)\s+(\d{1,2}\/\d{1,2}\/\d{4})`)
-	
+
 	matches := rangePattern.FindAllStringSubmatch(text, -1)
 	for _, match := range matches {
 		if len(match) >= 6 {
 			var startDate, endDate *string
-			
+
 			if match[1] != "" && match[2] != "" && match[3] != "" {
 				// Format: "January 1-3, 2024"
 				start := fmt.Sprintf("%s, %s", match[1], match[3])
 				end := fmt.Sprintf("%s %s, %s", strings.Fields(match[1])[0], match[2], match[3])
-				
+
 				if parsed := de.parseAndValidateDate(start, "event_date"); parsed != nil {
 					startDate = parsed
 				}
@@ -340,7 +323,7 @@ func (de *DateExtractor) extractDateRanges(text string) []DateRange {
 					endDate = parsed
 				}
 			}
-			
+
 			if startDate != nil && endDate != nil {
 				ranges = append(ranges, DateRange{
 					StartDate: startDate,
@@ -350,14 +333,13 @@ func (de *DateExtractor) extractDateRanges(text string) []DateRange {
 			}
 		}
 	}
-	
+
 	return ranges
 }
 
-// inferRangeType attempts to determine the type of date range based on context
 func (de *DateExtractor) inferRangeType(text, startDate, endDate string) string {
 	lower := strings.ToLower(text)
-	
+
 	switch {
 	case strings.Contains(lower, "trial"):
 		return "trial_dates"
@@ -372,80 +354,32 @@ func (de *DateExtractor) inferRangeType(text, startDate, endDate string) string 
 	}
 }
 
-// ValidateAllDates validates all dates in a DateExtractionResult
 func (de *DateExtractor) ValidateAllDates(result *DateExtractionResult) error {
 	var errors []string
-	
+
 	if result.FilingDate != nil && !de.validateDate(*result.FilingDate, "filing_date") {
 		errors = append(errors, fmt.Sprintf("invalid filing_date: %s", *result.FilingDate))
 	}
-	
+
 	if result.EventDate != nil && !de.validateDate(*result.EventDate, "event_date") {
 		errors = append(errors, fmt.Sprintf("invalid event_date: %s", *result.EventDate))
 	}
-	
+
 	if result.HearingDate != nil && !de.validateDate(*result.HearingDate, "hearing_date") {
 		errors = append(errors, fmt.Sprintf("invalid hearing_date: %s", *result.HearingDate))
 	}
-	
+
 	if result.DecisionDate != nil && !de.validateDate(*result.DecisionDate, "decision_date") {
 		errors = append(errors, fmt.Sprintf("invalid decision_date: %s", *result.DecisionDate))
 	}
-	
+
 	if result.ServedDate != nil && !de.validateDate(*result.ServedDate, "served_date") {
 		errors = append(errors, fmt.Sprintf("invalid served_date: %s", *result.ServedDate))
 	}
-	
+
 	if len(errors) > 0 {
 		return fmt.Errorf("date validation errors: %s", strings.Join(errors, "; "))
 	}
-	
-	return nil
-}
 
-// MergeDates merges two DateExtractionResult objects, preferring non-nil values
-func MergeDates(primary, secondary *DateExtractionResult) *DateExtractionResult {
-	if primary == nil {
-		return secondary
-	}
-	if secondary == nil {
-		return primary
-	}
-	
-	result := &DateExtractionResult{}
-	
-	if primary.FilingDate != nil {
-		result.FilingDate = primary.FilingDate
-	} else {
-		result.FilingDate = secondary.FilingDate
-	}
-	
-	if primary.EventDate != nil {
-		result.EventDate = primary.EventDate
-	} else {
-		result.EventDate = secondary.EventDate
-	}
-	
-	if primary.HearingDate != nil {
-		result.HearingDate = primary.HearingDate
-	} else {
-		result.HearingDate = secondary.HearingDate
-	}
-	
-	if primary.DecisionDate != nil {
-		result.DecisionDate = primary.DecisionDate
-	} else {
-		result.DecisionDate = secondary.DecisionDate
-	}
-	
-	if primary.ServedDate != nil {
-		result.ServedDate = primary.ServedDate
-	} else {
-		result.ServedDate = secondary.ServedDate
-	}
-	
-	// Merge date ranges
-	result.DateRanges = append(primary.DateRanges, secondary.DateRanges...)
-	
-	return result
+	return nil
 }

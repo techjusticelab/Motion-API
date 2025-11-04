@@ -1,8 +1,9 @@
 package models
 
-import "time"
+import (
+	"time"
+)
 
-// Document represents a legal document in the search index
 type Document struct {
 	ID          string            `json:"id"`
 	FileName    string            `json:"file_name"`
@@ -24,7 +25,6 @@ type Document struct {
 	Content string `json:"content,omitempty"`
 }
 
-// DocumentMetadata contains comprehensive legal-specific metadata
 type DocumentMetadata struct {
 	// Basic Information
 	DocumentName string       `json:"document_name"`
@@ -73,7 +73,6 @@ type DocumentMetadata struct {
 	Author     string `json:"author,omitempty"`
 }
 
-// GetCaseName returns the case name from either the Case struct or legacy field
 func (dm *DocumentMetadata) GetCaseName() string {
 	if dm.Case != nil && dm.Case.CaseName != "" {
 		return dm.Case.CaseName
@@ -81,7 +80,6 @@ func (dm *DocumentMetadata) GetCaseName() string {
 	return dm.CaseName
 }
 
-// GetCaseNumber returns the case number from either the Case struct or legacy field
 func (dm *DocumentMetadata) GetCaseNumber() string {
 	if dm.Case != nil && dm.Case.CaseNumber != "" {
 		return dm.Case.CaseNumber
@@ -89,7 +87,6 @@ func (dm *DocumentMetadata) GetCaseNumber() string {
 	return dm.CaseNumber
 }
 
-// GetCourtName returns the court name from the Court struct
 func (dm *DocumentMetadata) GetCourtName() string {
 	if dm.Court != nil {
 		return dm.Court.CourtName
@@ -97,7 +94,6 @@ func (dm *DocumentMetadata) GetCourtName() string {
 	return ""
 }
 
-// GetJudgeName returns the judge name from the Judge struct
 func (dm *DocumentMetadata) GetJudgeName() string {
 	if dm.Judge != nil {
 		return dm.Judge.Name
@@ -105,7 +101,6 @@ func (dm *DocumentMetadata) GetJudgeName() string {
 	return ""
 }
 
-// HasLegalTag checks if the document has a specific legal tag
 func (dm *DocumentMetadata) HasLegalTag(tag string) bool {
 	for _, t := range dm.LegalTags {
 		if t == tag {
@@ -115,14 +110,12 @@ func (dm *DocumentMetadata) HasLegalTag(tag string) bool {
 	return false
 }
 
-// AddLegalTag adds a legal tag if it doesn't already exist
 func (dm *DocumentMetadata) AddLegalTag(tag string) {
 	if !dm.HasLegalTag(tag) {
 		dm.LegalTags = append(dm.LegalTags, tag)
 	}
 }
 
-// GetPrimaryAttorney returns the first attorney in the list, if any
 func (dm *DocumentMetadata) GetPrimaryAttorney() *Attorney {
 	if len(dm.Attorneys) > 0 {
 		return &dm.Attorneys[0]
@@ -130,7 +123,6 @@ func (dm *DocumentMetadata) GetPrimaryAttorney() *Attorney {
 	return nil
 }
 
-// GetDefenseAttorneys returns all attorneys with "defense" role
 func (dm *DocumentMetadata) GetDefenseAttorneys() []Attorney {
 	var defense []Attorney
 	for _, attorney := range dm.Attorneys {
@@ -141,7 +133,6 @@ func (dm *DocumentMetadata) GetDefenseAttorneys() []Attorney {
 	return defense
 }
 
-// GetProsecutionAttorneys returns all attorneys with "prosecution" role
 func (dm *DocumentMetadata) GetProsecutionAttorneys() []Attorney {
 	var prosecution []Attorney
 	for _, attorney := range dm.Attorneys {
@@ -152,27 +143,22 @@ func (dm *DocumentMetadata) GetProsecutionAttorneys() []Attorney {
 	return prosecution
 }
 
-// IsMotion returns true if this document is a motion
 func (dm *DocumentMetadata) IsMotion() bool {
 	return dm.DocumentType.IsMotion()
 }
 
-// IsOrder returns true if this document is an order or ruling
 func (dm *DocumentMetadata) IsOrder() bool {
 	return dm.DocumentType.IsOrder()
 }
 
-// IsPleading returns true if this document is a pleading
 func (dm *DocumentMetadata) IsPleading() bool {
 	return dm.DocumentType.IsPleading()
 }
 
-// GetDocumentCategory returns the general category for this document
 func (dm *DocumentMetadata) GetDocumentCategory() string {
 	return dm.DocumentType.GetCategory()
 }
 
-// SetLegacyFields populates legacy fields for backward compatibility
 func (dm *DocumentMetadata) SetLegacyFields() {
 	dm.CaseName = dm.GetCaseName()
 	dm.CaseNumber = dm.GetCaseNumber()
@@ -181,7 +167,6 @@ func (dm *DocumentMetadata) SetLegacyFields() {
 	}
 }
 
-// NewDocumentMetadata creates a new DocumentMetadata with default values
 func NewDocumentMetadata() *DocumentMetadata {
 	return &DocumentMetadata{
 		ProcessedAt:  time.Now(),
@@ -196,7 +181,6 @@ func NewDocumentMetadata() *DocumentMetadata {
 	}
 }
 
-// GetDocumentMapping returns the enhanced OpenSearch mapping for legal documents
 func GetDocumentMapping() map[string]interface{} {
 	return map[string]interface{}{
 		"mappings": map[string]interface{}{
@@ -287,7 +271,6 @@ func GetDocumentMapping() map[string]interface{} {
 	}
 }
 
-// getMetadataMapping returns the detailed mapping for the metadata field
 func getMetadataMapping() map[string]interface{} {
 	return map[string]interface{}{
 		"properties": map[string]interface{}{
@@ -369,176 +352,6 @@ func getMetadataMapping() map[string]interface{} {
 				"type": "keyword",
 			},
 			"author": map[string]interface{}{
-				"type": "keyword",
-			},
-		},
-	}
-}
-
-// Helper functions for mapping components
-func getCaseMapping() map[string]interface{} {
-	return map[string]interface{}{
-		"properties": map[string]interface{}{
-			"case_number": map[string]interface{}{
-				"type": "keyword",
-			},
-			"case_name": map[string]interface{}{
-				"type": "text",
-				"fields": map[string]interface{}{
-					"keyword": map[string]interface{}{
-						"type": "keyword",
-					},
-				},
-			},
-			"case_type": map[string]interface{}{
-				"type": "keyword",
-			},
-			"chapter": map[string]interface{}{
-				"type": "keyword",
-			},
-			"docket": map[string]interface{}{
-				"type": "keyword",
-			},
-			"nature_of_suit": map[string]interface{}{
-				"type": "keyword",
-			},
-		},
-	}
-}
-
-func getCourtMapping() map[string]interface{} {
-	return map[string]interface{}{
-		"properties": map[string]interface{}{
-			"court_id": map[string]interface{}{
-				"type": "keyword",
-			},
-			"court_name": map[string]interface{}{
-				"type": "keyword",
-			},
-			"jurisdiction": map[string]interface{}{
-				"type": "keyword",
-			},
-			"level": map[string]interface{}{
-				"type": "keyword",
-			},
-			"district": map[string]interface{}{
-				"type": "keyword",
-			},
-			"division": map[string]interface{}{
-				"type": "keyword",
-			},
-			"county": map[string]interface{}{
-				"type": "keyword",
-			},
-		},
-	}
-}
-
-func getPartiesMapping() map[string]interface{} {
-	return map[string]interface{}{
-		"type": "nested",
-		"properties": map[string]interface{}{
-			"name": map[string]interface{}{
-				"type": "keyword",
-			},
-			"role": map[string]interface{}{
-				"type": "keyword",
-			},
-			"party_type": map[string]interface{}{
-				"type": "keyword",
-			},
-			"date": map[string]interface{}{
-				"type": "date",
-			},
-		},
-	}
-}
-
-func getAttorneysMapping() map[string]interface{} {
-	return map[string]interface{}{
-		"type": "nested",
-		"properties": map[string]interface{}{
-			"name": map[string]interface{}{
-				"type": "keyword",
-			},
-			"bar_number": map[string]interface{}{
-				"type": "keyword",
-			},
-			"role": map[string]interface{}{
-				"type": "keyword",
-			},
-			"organization": map[string]interface{}{
-				"type": "keyword",
-			},
-			"contact_info": map[string]interface{}{
-				"type":  "keyword",
-				"index": false,
-			},
-		},
-	}
-}
-
-func getJudgeMapping() map[string]interface{} {
-	return map[string]interface{}{
-		"properties": map[string]interface{}{
-			"name": map[string]interface{}{
-				"type": "keyword",
-			},
-			"title": map[string]interface{}{
-				"type": "keyword",
-			},
-			"judge_id": map[string]interface{}{
-				"type": "keyword",
-			},
-		},
-	}
-}
-
-func getChargesMapping() map[string]interface{} {
-	return map[string]interface{}{
-		"type": "nested",
-		"properties": map[string]interface{}{
-			"statute": map[string]interface{}{
-				"type": "keyword",
-			},
-			"description": map[string]interface{}{
-				"type": "text",
-			},
-			"grade": map[string]interface{}{
-				"type": "keyword",
-			},
-			"class": map[string]interface{}{
-				"type": "keyword",
-			},
-			"count": map[string]interface{}{
-				"type": "integer",
-			},
-		},
-	}
-}
-
-func getAuthoritiesMapping() map[string]interface{} {
-	return map[string]interface{}{
-		"type": "nested",
-		"properties": map[string]interface{}{
-			"citation": map[string]interface{}{
-				"type": "keyword",
-			},
-			"case_title": map[string]interface{}{
-				"type": "text",
-				"fields": map[string]interface{}{
-					"keyword": map[string]interface{}{
-						"type": "keyword",
-					},
-				},
-			},
-			"type": map[string]interface{}{
-				"type": "keyword",
-			},
-			"precedent": map[string]interface{}{
-				"type": "boolean",
-			},
-			"page": map[string]interface{}{
 				"type": "keyword",
 			},
 		},

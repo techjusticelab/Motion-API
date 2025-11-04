@@ -4,28 +4,24 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"time"
-
-	"motion-index-fiber/pkg/processing/classifier"
 	"motion-index-fiber/pkg/models"
+	"motion-index-fiber/pkg/processing/classifier"
+	"time"
 )
 
-// MetadataMigrator handles migration from legacy metadata to enhanced schema
 type MetadataMigrator struct {
-	classifier       classifier.Classifier
-	batchSize        int
-	enableReprocess  bool
+	classifier          classifier.Classifier
+	batchSize           int
+	enableReprocess     bool
 	confidenceThreshold float64
 }
 
-// MigrationConfig configures the migration process
 type MigrationConfig struct {
 	BatchSize           int     `json:"batch_size"`
-	EnableReprocess     bool    `json:"enable_reprocess"`      // Re-run AI classification on existing docs
-	ConfidenceThreshold float64 `json:"confidence_threshold"`  // Minimum confidence for automated migration
+	EnableReprocess     bool    `json:"enable_reprocess"`     // Re-run AI classification on existing docs
+	ConfidenceThreshold float64 `json:"confidence_threshold"` // Minimum confidence for automated migration
 }
 
-// NewMetadataMigrator creates a new metadata migrator
 func NewMetadataMigrator(classifier classifier.Classifier, config *MigrationConfig) *MetadataMigrator {
 	if config == nil {
 		config = &MigrationConfig{
@@ -37,40 +33,36 @@ func NewMetadataMigrator(classifier classifier.Classifier, config *MigrationConf
 
 	return &MetadataMigrator{
 		classifier:          classifier,
-		batchSize:          config.BatchSize,
-		enableReprocess:    config.EnableReprocess,
+		batchSize:           config.BatchSize,
+		enableReprocess:     config.EnableReprocess,
 		confidenceThreshold: config.ConfidenceThreshold,
 	}
 }
 
-// MigrationResult contains the results of a migration operation
 type MigrationResult struct {
-	ProcessedCount    int                    `json:"processed_count"`
-	SuccessCount      int                    `json:"success_count"`
-	ErrorCount        int                    `json:"error_count"`
-	SkippedCount      int                    `json:"skipped_count"`
-	LowConfidenceCount int                   `json:"low_confidence_count"`
-	Errors            []MigrationError       `json:"errors,omitempty"`
-	Stats             MigrationStats         `json:"stats"`
-	Duration          time.Duration          `json:"duration"`
+	ProcessedCount     int              `json:"processed_count"`
+	SuccessCount       int              `json:"success_count"`
+	ErrorCount         int              `json:"error_count"`
+	SkippedCount       int              `json:"skipped_count"`
+	LowConfidenceCount int              `json:"low_confidence_count"`
+	Errors             []MigrationError `json:"errors,omitempty"`
+	Stats              MigrationStats   `json:"stats"`
+	Duration           time.Duration    `json:"duration"`
 }
 
-// MigrationError represents an error during migration
 type MigrationError struct {
 	DocumentID string `json:"document_id"`
 	Error      string `json:"error"`
 	Stage      string `json:"stage"`
 }
 
-// MigrationStats provides statistics about the migration
 type MigrationStats struct {
-	DocumentTypeDistribution map[string]int    `json:"document_type_distribution"`
-	AverageConfidence       float64           `json:"average_confidence"`
-	ProcessingTimeMs        int64             `json:"processing_time_ms"`
-	EnhancedFieldsCoverage  map[string]float64 `json:"enhanced_fields_coverage"`
+	DocumentTypeDistribution map[string]int     `json:"document_type_distribution"`
+	AverageConfidence        float64            `json:"average_confidence"`
+	ProcessingTimeMs         int64              `json:"processing_time_ms"`
+	EnhancedFieldsCoverage   map[string]float64 `json:"enhanced_fields_coverage"`
 }
 
-// MigrateDocument converts a legacy document to the enhanced schema
 func (m *MetadataMigrator) MigrateDocument(ctx context.Context, legacyDoc *models.Document) (*models.Document, error) {
 	if legacyDoc == nil || legacyDoc.Metadata == nil {
 		return nil, fmt.Errorf("invalid document provided for migration")
@@ -91,7 +83,7 @@ func (m *MetadataMigrator) MigrateDocument(ctx context.Context, legacyDoc *model
 		UpdatedAt:   time.Now(),
 		Size:        legacyDoc.Size,
 		ContentType: legacyDoc.ContentType,
-		
+
 		// Backward compatibility fields
 		Title:   legacyDoc.Title,
 		Content: legacyDoc.Content,
@@ -107,32 +99,31 @@ func (m *MetadataMigrator) MigrateDocument(ctx context.Context, legacyDoc *model
 	return enhancedDoc, nil
 }
 
-// migrateMetadata converts legacy metadata to enhanced schema
 func (m *MetadataMigrator) migrateMetadata(ctx context.Context, legacyDoc *models.Document) (*models.DocumentMetadata, error) {
 	legacy := legacyDoc.Metadata
-	
+
 	// Start with enhanced metadata structure
 	enhanced := &models.DocumentMetadata{
 		// Basic Information - preserve existing data
 		DocumentName: legacy.DocumentName,
 		Subject:      legacy.Subject,
 		DocumentType: models.DocTypeUnknown, // Will be determined by classification
-		
+
 		// Dates & Status
-		Status:       legacy.Status,
-		Language:     legacy.Language,
-		Pages:        legacy.Pages,
-		WordCount:    legacy.WordCount,
-		LegalTags:    legacy.LegalTags,
-		
+		Status:    legacy.Status,
+		Language:  legacy.Language,
+		Pages:     legacy.Pages,
+		WordCount: legacy.WordCount,
+		LegalTags: legacy.LegalTags,
+
 		// Processing metadata
 		ProcessedAt:  time.Now(),
 		AIClassified: false,
-		
+
 		// Legacy compatibility fields
-		CaseName:     legacy.CaseName,
-		CaseNumber:   legacy.CaseNumber,
-		Author:       legacy.Author,
+		CaseName:   legacy.CaseName,
+		CaseNumber: legacy.CaseNumber,
+		Author:     legacy.Author,
 	}
 
 	// Handle timestamp conversion
@@ -174,7 +165,7 @@ func (m *MetadataMigrator) migrateMetadata(ctx context.Context, legacyDoc *model
 			enhanced.Subject = result.Subject
 			enhanced.Confidence = result.Confidence
 			enhanced.AIClassified = true
-			
+
 			// Enhanced legal extractions
 			if result.CaseInfo != nil {
 				enhanced.Case = &models.CaseInfo{
@@ -186,7 +177,7 @@ func (m *MetadataMigrator) migrateMetadata(ctx context.Context, legacyDoc *model
 					NatureOfSuit: result.CaseInfo.NatureOfSuit,
 				}
 			}
-			
+
 			if result.CourtInfo != nil {
 				enhanced.Court = &models.CourtInfo{
 					CourtID:      result.CourtInfo.CourtID,
@@ -198,7 +189,7 @@ func (m *MetadataMigrator) migrateMetadata(ctx context.Context, legacyDoc *model
 					County:       result.CourtInfo.County,
 				}
 			}
-			
+
 			if result.Judge != nil {
 				enhanced.Judge = &models.Judge{
 					Name:    result.Judge.Name,
@@ -206,7 +197,7 @@ func (m *MetadataMigrator) migrateMetadata(ctx context.Context, legacyDoc *model
 					JudgeID: result.Judge.JudgeID,
 				}
 			}
-			
+
 			// Convert parties
 			if len(result.Parties) > 0 {
 				enhanced.Parties = make([]models.Party, len(result.Parties))
@@ -218,7 +209,7 @@ func (m *MetadataMigrator) migrateMetadata(ctx context.Context, legacyDoc *model
 					}
 				}
 			}
-			
+
 			// Convert attorneys
 			if len(result.Attorneys) > 0 {
 				enhanced.Attorneys = make([]models.Attorney, len(result.Attorneys))
@@ -231,7 +222,7 @@ func (m *MetadataMigrator) migrateMetadata(ctx context.Context, legacyDoc *model
 					}
 				}
 			}
-			
+
 			// Convert charges
 			if len(result.Charges) > 0 {
 				enhanced.Charges = make([]models.Charge, len(result.Charges))
@@ -245,7 +236,7 @@ func (m *MetadataMigrator) migrateMetadata(ctx context.Context, legacyDoc *model
 					}
 				}
 			}
-			
+
 			// Convert authorities
 			if len(result.Authorities) > 0 {
 				enhanced.Authorities = make([]models.Authority, len(result.Authorities))
@@ -259,7 +250,7 @@ func (m *MetadataMigrator) migrateMetadata(ctx context.Context, legacyDoc *model
 					}
 				}
 			}
-			
+
 			// Handle dates
 			if result.FilingDate != nil {
 				if filingDate, err := time.Parse("2006-01-02", *result.FilingDate); err == nil {
@@ -271,7 +262,7 @@ func (m *MetadataMigrator) migrateMetadata(ctx context.Context, legacyDoc *model
 					enhanced.EventDate = &eventDate
 				}
 			}
-			
+
 			// Update legal tags and keywords
 			if len(result.LegalTags) > 0 {
 				enhanced.LegalTags = result.LegalTags
@@ -287,7 +278,6 @@ func (m *MetadataMigrator) migrateMetadata(ctx context.Context, legacyDoc *model
 	return enhanced, nil
 }
 
-// enhanceWithAI uses AI classification to enhance document metadata
 func (m *MetadataMigrator) enhanceWithAI(ctx context.Context, legacyDoc *models.Document) (*classifier.ClassificationResult, error) {
 	if m.classifier == nil {
 		return nil, fmt.Errorf("classifier not available")
@@ -306,7 +296,6 @@ func (m *MetadataMigrator) enhanceWithAI(ctx context.Context, legacyDoc *models.
 	return m.classifier.Classify(ctx, legacyDoc.Text, classifierMetadata)
 }
 
-// inferDocumentTypeFromLegacy attempts to infer document type from legacy data
 func (m *MetadataMigrator) inferDocumentTypeFromLegacy(legacy *models.DocumentMetadata) models.DocumentType {
 	// Check filename for clues
 	fileName := legacy.DocumentName
@@ -348,7 +337,6 @@ func (m *MetadataMigrator) inferDocumentTypeFromLegacy(legacy *models.DocumentMe
 	}
 }
 
-// contains checks if all terms are present in the text (case-insensitive)
 func contains(text string, terms ...string) bool {
 	for _, term := range terms {
 		if !stringContains(text, term) {
@@ -358,15 +346,13 @@ func contains(text string, terms ...string) bool {
 	return true
 }
 
-// stringContains performs case-insensitive substring check
 func stringContains(text, substr string) bool {
-	return len(text) >= len(substr) && 
-		   (len(substr) == 0 || 
-		    stringToLower(text[:len(substr)]) == stringToLower(substr) ||
-		    stringContains(text[1:], substr))
+	return len(text) >= len(substr) &&
+		(len(substr) == 0 ||
+			stringToLower(text[:len(substr)]) == stringToLower(substr) ||
+			stringContains(text[1:], substr))
 }
 
-// stringToLower converts string to lowercase (simple implementation)
 func stringToLower(s string) string {
 	result := make([]byte, len(s))
 	for i, b := range []byte(s) {
@@ -377,68 +363,4 @@ func stringToLower(s string) string {
 		}
 	}
 	return string(result)
-}
-
-// BatchMigrate processes multiple documents in batches
-func (m *MetadataMigrator) BatchMigrate(ctx context.Context, documents []*models.Document) *MigrationResult {
-	startTime := time.Now()
-	result := &MigrationResult{
-		Stats: MigrationStats{
-			DocumentTypeDistribution: make(map[string]int),
-			EnhancedFieldsCoverage:  make(map[string]float64),
-		},
-	}
-
-	var totalConfidence float64
-	var confidenceCount int
-
-	for _, doc := range documents {
-		result.ProcessedCount++
-
-		migratedDoc, err := m.MigrateDocument(ctx, doc)
-		if err != nil {
-			result.ErrorCount++
-			result.Errors = append(result.Errors, MigrationError{
-				DocumentID: doc.ID,
-				Error:      err.Error(),
-				Stage:      "migration",
-			})
-			continue
-		}
-
-		if migratedDoc.Metadata.Confidence < m.confidenceThreshold {
-			result.LowConfidenceCount++
-		}
-
-		if migratedDoc.Metadata.Confidence > 0 {
-			totalConfidence += migratedDoc.Metadata.Confidence
-			confidenceCount++
-		}
-
-		// Update statistics
-		docType := string(migratedDoc.Metadata.DocumentType)
-		result.Stats.DocumentTypeDistribution[docType]++
-		
-		result.SuccessCount++
-	}
-
-	// Calculate averages
-	if confidenceCount > 0 {
-		result.Stats.AverageConfidence = totalConfidence / float64(confidenceCount)
-	}
-
-	result.Duration = time.Since(startTime)
-	result.Stats.ProcessingTimeMs = result.Duration.Milliseconds()
-
-	// Calculate field coverage
-	if result.SuccessCount > 0 {
-		// This would be calculated based on how many documents have each enhanced field populated
-		// Simplified for now
-		result.Stats.EnhancedFieldsCoverage["case_info"] = 0.8
-		result.Stats.EnhancedFieldsCoverage["court_info"] = 0.6
-		result.Stats.EnhancedFieldsCoverage["parties"] = 0.4
-		result.Stats.EnhancedFieldsCoverage["enhanced_summary"] = float64(result.SuccessCount-result.LowConfidenceCount) / float64(result.SuccessCount)
-	}
-
-	return result
 }

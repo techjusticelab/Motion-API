@@ -1,13 +1,11 @@
 package query
 
 import (
+	"motion-index-fiber/pkg/models"
 	"strings"
 	"time"
-
-	"motion-index-fiber/pkg/models"
 )
 
-// Builder implements the QueryBuilder interface for OpenSearch queries
 type Builder struct {
 	query       map[string]interface{}
 	filters     []map[string]interface{}
@@ -18,7 +16,6 @@ type Builder struct {
 	size        int
 }
 
-// NewBuilder creates a new query builder
 func NewBuilder() *Builder {
 	return &Builder{
 		query:       make(map[string]interface{}),
@@ -30,7 +27,6 @@ func NewBuilder() *Builder {
 	}
 }
 
-// BuildQuery constructs an OpenSearch query from a search request
 func (b *Builder) BuildQuery(req *models.SearchRequest) (map[string]interface{}, error) {
 	b.Reset()
 
@@ -75,7 +71,6 @@ func (b *Builder) BuildQuery(req *models.SearchRequest) (map[string]interface{},
 	return b.Build(), nil
 }
 
-// buildMetadataFilters creates metadata filters from the search request
 func (b *Builder) buildMetadataFilters(req *models.SearchRequest) map[string]interface{} {
 	filters := make(map[string]interface{})
 
@@ -114,7 +109,6 @@ func (b *Builder) buildMetadataFilters(req *models.SearchRequest) map[string]int
 	return filters
 }
 
-// AddTextQuery adds a text search query
 func (b *Builder) AddTextQuery(query string, fuzzy bool) *Builder {
 	if query == "" {
 		return b
@@ -136,7 +130,6 @@ func (b *Builder) AddTextQuery(query string, fuzzy bool) *Builder {
 	return b
 }
 
-// AddMetadataFilters adds metadata filtering
 func (b *Builder) AddMetadataFilters(filters map[string]interface{}, matchAll bool) *Builder {
 	for field, value := range filters {
 		var filterQuery map[string]interface{}
@@ -196,7 +189,6 @@ func (b *Builder) AddMetadataFilters(filters map[string]interface{}, matchAll bo
 	return b
 }
 
-// AddDateRange adds date range filtering
 func (b *Builder) AddDateRange(field string, from, to *time.Time) *Builder {
 	if from == nil && to == nil {
 		return b
@@ -222,7 +214,6 @@ func (b *Builder) AddDateRange(field string, from, to *time.Time) *Builder {
 	return b
 }
 
-// AddSorting adds sorting to the query
 func (b *Builder) AddSorting(field string, order models.SortOrder) *Builder {
 	sortQuery := map[string]interface{}{
 		field: map[string]interface{}{
@@ -244,7 +235,6 @@ func (b *Builder) AddSorting(field string, order models.SortOrder) *Builder {
 	return b
 }
 
-// AddPagination adds pagination parameters
 func (b *Builder) AddPagination(from, size int) *Builder {
 	if from >= 0 {
 		b.from = from
@@ -255,7 +245,6 @@ func (b *Builder) AddPagination(from, size int) *Builder {
 	return b
 }
 
-// AddHighlighting adds highlighting for search terms
 func (b *Builder) AddHighlighting(fields []string) *Builder {
 	if len(fields) == 0 {
 		return b
@@ -279,7 +268,6 @@ func (b *Builder) AddHighlighting(fields []string) *Builder {
 	return b
 }
 
-// Reset clears the current query builder state
 func (b *Builder) Reset() *Builder {
 	b.query = make(map[string]interface{})
 	b.filters = make([]map[string]interface{}, 0)
@@ -291,7 +279,6 @@ func (b *Builder) Reset() *Builder {
 	return b
 }
 
-// Build returns the final query as a map
 func (b *Builder) Build() map[string]interface{} {
 	query := make(map[string]interface{})
 
@@ -350,13 +337,12 @@ func (b *Builder) Build() map[string]interface{} {
 	return query
 }
 
-// WithQuery sets the main query string for text search
 func (b *Builder) WithQuery(query string) *Builder {
 	if query == "" {
 		// Empty query - use match_all
 		return b
 	}
-	
+
 	// Create multi_match query similar to test expectations
 	queryMap := map[string]interface{}{
 		"multi_match": map[string]interface{}{
@@ -374,156 +360,7 @@ func (b *Builder) WithQuery(query string) *Builder {
 			"operator": "and",
 		},
 	}
-	
+
 	b.mustQueries = append(b.mustQueries, queryMap)
 	return b
-}
-
-// WithFilters adds filters to the query (overloaded to support both types)
-func (b *Builder) WithFilters(filters interface{}) *Builder {
-	switch f := filters.(type) {
-	case *models.Filters:
-		if f == nil {
-			return b
-		}
-		filterMap := make(map[string]interface{})
-		if len(f.DocType) > 0 {
-			filterMap["doc_type"] = f.DocType
-		}
-		if len(f.Court) > 0 {
-			filterMap["metadata.court"] = f.Court
-		}
-		if len(f.Judge) > 0 {
-			filterMap["metadata.judge"] = f.Judge
-		}
-		if len(f.Author) > 0 {
-			filterMap["metadata.author"] = f.Author
-		}
-		if len(f.Status) > 0 {
-			filterMap["metadata.status"] = f.Status
-		}
-		if len(f.LegalTags) > 0 {
-			filterMap["metadata.legal_tags"] = f.LegalTags
-		}
-		return b.AddMetadataFilters(filterMap, false)
-	case map[string]interface{}:
-		// Handle raw map filters for test compatibility
-		for field, value := range f {
-			filterQuery := map[string]interface{}{
-				"term": map[string]interface{}{
-					field + ".keyword": value,
-				},
-			}
-			b.filters = append(b.filters, filterQuery)
-		}
-		return b
-	default:
-		return b
-	}
-}
-
-// WithDateRange adds date range filtering (overloaded to support both types)
-func (b *Builder) WithDateRange(args ...interface{}) *Builder {
-	if len(args) == 1 {
-		// Single argument - expect *models.DateRange
-		if dateRange, ok := args[0].(*models.DateRange); ok && dateRange != nil {
-			return b.AddDateRange("created_at", dateRange.From, dateRange.To)
-		}
-	} else if len(args) == 3 {
-		// Three arguments - field, from, to strings for test compatibility
-		field, _ := args[0].(string)
-		from, _ := args[1].(string)
-		to, _ := args[2].(string)
-		
-		if field == "" {
-			return b
-		}
-		
-		rangeQuery := map[string]interface{}{
-			"range": map[string]interface{}{
-				field: make(map[string]interface{}),
-			},
-		}
-		
-		rangeField := rangeQuery["range"].(map[string]interface{})[field].(map[string]interface{})
-		
-		if from != "" {
-			rangeField["gte"] = from
-		}
-		if to != "" {
-			rangeField["lte"] = to
-		}
-		
-		b.filters = append(b.filters, rangeQuery)
-	}
-	return b
-}
-
-// WithSort adds sorting to the query (overloaded to support both types)
-func (b *Builder) WithSort(args ...interface{}) *Builder {
-	if len(args) == 1 {
-		// Single argument - expect *models.SortOptions
-		if sortOptions, ok := args[0].(*models.SortOptions); ok && sortOptions != nil {
-			return b.AddSorting(sortOptions.Field, sortOptions.Order)
-		}
-	} else if len(args) == 2 {
-		// Two arguments - field string, ascending bool for test compatibility
-		field, _ := args[0].(string)
-		ascending, _ := args[1].(bool)
-		
-		if field == "" {
-			return b
-		}
-		
-		order := "desc"
-		if ascending {
-			order = "asc"
-		}
-		
-		sortQuery := map[string]interface{}{
-			field: map[string]interface{}{
-				"order": order,
-			},
-		}
-		
-		b.sort = append(b.sort, sortQuery)
-	}
-	return b
-}
-
-// WithPagination adds pagination parameters
-func (b *Builder) WithPagination(from, size int) *Builder {
-	return b.AddPagination(from, size)
-}
-
-// WithHighlighting adds highlighting for specified fields
-func (b *Builder) WithHighlighting(fields []string) *Builder {
-	return b.AddHighlighting(fields)
-}
-
-// BuildFromSearchRequest builds a query from a SearchRequest for test compatibility
-func BuildFromSearchRequest(req *models.SearchRequest) map[string]interface{} {
-	builder := NewBuilder()
-	
-	if req.Query != "" {
-		builder.WithQuery(req.Query)
-	}
-	
-	if req.Filters != nil {
-		builder.WithFilters(req.Filters)
-	}
-	
-	if req.Sort != nil {
-		builder.WithSort(req.Sort)
-	}
-	
-	if req.Pagination != nil {
-		builder.WithPagination(req.Pagination.Offset, req.Pagination.Limit)
-	}
-	
-	if req.Highlight != nil && len(req.Highlight.Fields) > 0 {
-		builder.WithHighlighting(req.Highlight.Fields)
-	}
-	
-	return builder.Build()
 }

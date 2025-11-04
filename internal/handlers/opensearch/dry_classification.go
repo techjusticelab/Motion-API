@@ -7,28 +7,23 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
-	"os"
-	"path/filepath"
-	"regexp"
-	"strings"
-	"time"
-
-	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"github.com/jung-kurt/gofpdf"
-
+	"io"
 	"motion-index-fiber/internal/config"
 	internalmodels "motion-index-fiber/internal/models"
 	pkgmodels "motion-index-fiber/pkg/models"
 	pkgextractor "motion-index-fiber/pkg/processing/extractor"
 	pkgsearch "motion-index-fiber/pkg/search"
 	pkgstorage "motion-index-fiber/pkg/storage"
+	"os"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"strings"
+	"time"
 )
 
-// DryClassificationHandler provides an endpoint to perform a dry classification run.
-// It converts the uploaded document to PDF, uploads it to storage, extracts the text
-// and pushes the document without classification metadata to OpenSearch.
 type DryClassificationHandler struct {
 	cfg              *config.Config
 	storageService   pkgstorage.Service
@@ -37,7 +32,6 @@ type DryClassificationHandler struct {
 	jobQueue         *dryJobQueue
 }
 
-// NewDryClassificationHandler creates a new dry classification handler.
 func NewDryClassificationHandler(
 	cfg *config.Config,
 	storageService pkgstorage.Service,
@@ -54,7 +48,6 @@ func NewDryClassificationHandler(
 	return h
 }
 
-// Run handles the dry classification workflow.
 func (h *DryClassificationHandler) Run(c *fiber.Ctx) error {
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
@@ -94,8 +87,8 @@ func (h *DryClassificationHandler) Run(c *fiber.Ctx) error {
 	tempPath := tempFile.Name()
 
 	written, err := io.Copy(tempFile, src)
-	tempFile.Close()
 	if err != nil {
+		tempFile.Close()
 		os.Remove(tempPath)
 		return c.Status(fiber.StatusBadRequest).JSON(internalmodels.NewErrorResponse(
 			"file_read_failed",
@@ -103,6 +96,7 @@ func (h *DryClassificationHandler) Run(c *fiber.Ctx) error {
 			map[string]interface{}{"error": err.Error()},
 		))
 	}
+	tempFile.Close()
 
 	contentType := fileHeader.Header.Get("Content-Type")
 	if contentType == "" {
@@ -139,6 +133,9 @@ func (h *DryClassificationHandler) Run(c *fiber.Ctx) error {
 func (h *DryClassificationHandler) processDryJob(job *dryJob) dryJobResult {
 	defer os.Remove(job.payload.TempPath)
 
+	// Monitor memory usage at start
+	h.logMemoryUsage("Job start", job.payload.FileName)
+
 	if job.ctx.Err() != nil {
 		return dryJobResult{
 			status: fiber.StatusRequestTimeout,
@@ -151,18 +148,19 @@ func (h *DryClassificationHandler) processDryJob(job *dryJob) dryJobResult {
 		}
 	}
 
-	data, err := os.ReadFile(job.payload.TempPath)
+	tempFile, err := os.Open(job.payload.TempPath)
 	if err != nil {
 		return dryJobResult{
 			status: fiber.StatusInternalServerError,
 			body: internalmodels.NewErrorResponse(
-				"file_read_failed",
-				"Failed to read temporary file for processing",
+				"file_open_failed",
+				"Failed to open temporary file for processing",
 				map[string]interface{}{"error": err.Error()},
 			),
 			err: err,
 		}
 	}
+	defer tempFile.Close()
 
 	originalExt := strings.ToLower(filepath.Ext(job.payload.FileName))
 	ctx, cancel := context.WithTimeout(job.ctx, 5*time.Minute)
@@ -175,7 +173,7 @@ func (h *DryClassificationHandler) processDryJob(job *dryJob) dryJobResult {
 		Format:   strings.TrimPrefix(originalExt, "."),
 	}
 
-	intermediateExtraction, err := h.extractorService.ExtractText(ctx, bytes.NewReader(data), extractionMetadata)
+	intermediateExtraction, err := h.extractorService.ExtractText(ctx, tempFile, extractionMetadata)
 	if err != nil || intermediateExtraction == nil {
 		reason := "Failed to extract text from document"
 		if err != nil {
@@ -192,7 +190,11 @@ func (h *DryClassificationHandler) processDryJob(job *dryJob) dryJobResult {
 		}
 	}
 
-	pdfBytes, err := h.ensurePDFBytes(data, originalExt, intermediateExtraction.Text)
+	// Force garbage collection after text extraction to release memory from large string operations
+	runtime.GC()
+	h.logMemoryUsage("After extraction & GC", job.payload.FileName)
+
+	pdfBytes, err := h.ensurePDFBytes(tempFile, originalExt, intermediateExtraction.Text)
 	if err != nil {
 		return dryJobResult{
 			status: fiber.StatusInternalServerError,
@@ -273,6 +275,10 @@ func (h *DryClassificationHandler) processDryJob(job *dryJob) dryJobResult {
 		}
 	}
 
+	// Force garbage collection after indexing to release accumulated document memory
+	runtime.GC()
+	h.logMemoryUsage("After indexing & GC", job.payload.FileName)
+
 	response := fiber.Map{
 		"document_id":    documentID,
 		"storage_path":   storagePath,
@@ -292,9 +298,14 @@ func (h *DryClassificationHandler) processDryJob(job *dryJob) dryJobResult {
 	}
 }
 
-func (h *DryClassificationHandler) ensurePDFBytes(original []byte, ext string, text string) ([]byte, error) {
+func (h *DryClassificationHandler) ensurePDFBytes(file *os.File, ext string, text string) ([]byte, error) {
 	if strings.EqualFold(ext, ".pdf") {
-		return original, nil
+		// For PDF files, read the original file content
+		_, err := file.Seek(0, 0) // Reset to beginning
+		if err != nil {
+			return nil, fmt.Errorf("failed to seek to beginning of file: %w", err)
+		}
+		return io.ReadAll(file)
 	}
 
 	if text == "" {

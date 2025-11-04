@@ -8,19 +8,15 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"path/filepath"
-	"regexp"
-	"strconv"
-	"strings"
-	"time"
-
-	"github.com/gofiber/fiber/v2"
 	"motion-index-fiber/internal/config"
 	internalModels "motion-index-fiber/internal/models"
 	pkgmodels "motion-index-fiber/pkg/models"
 	pkgextractor "motion-index-fiber/pkg/processing/extractor"
 	pkgsearch "motion-index-fiber/pkg/search"
 	"motion-index-fiber/pkg/storage"
+	"path/filepath"
+	"strings"
+	"time"
 )
 
 type UploadHandler struct {
@@ -39,7 +35,6 @@ func NewUploadHandler(cfg *config.Config, storage storage.Service, extractor pkg
 	}
 }
 
-// UploadDocumentToS3 handles POST /upload/s3 - Upload documents to DigitalOcean Spaces
 func (h *UploadHandler) UploadDocumentToS3(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(c.Context(), 10*time.Minute)
 	defer cancel()
@@ -166,7 +161,6 @@ func (h *UploadHandler) UploadDocumentToS3(c *fiber.Ctx) error {
 	return c.JSON(internalModels.NewSuccessResponse(response, "All files uploaded successfully"))
 }
 
-// UploadDocumentAndIndex handles POST /upload/index - upload, extract, and index document in OpenSearch
 func (h *UploadHandler) UploadDocumentAndIndex(c *fiber.Ctx) error {
 	if h.extractor == nil || h.search == nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(internalModels.NewErrorResponse(
@@ -360,7 +354,6 @@ func (h *UploadHandler) UploadDocumentAndIndex(c *fiber.Ctx) error {
 	))
 }
 
-// isValidFileType checks if the file type is allowed
 func isValidFileType(filename string) bool {
 	ext := strings.ToLower(filepath.Ext(filename))
 	validExtensions := map[string]bool{
@@ -374,7 +367,6 @@ func isValidFileType(filename string) bool {
 	return validExtensions[ext]
 }
 
-// generateRandomID creates a random ID for file naming
 func generateRandomID() (string, error) {
 	bytes := make([]byte, 16)
 	_, err := rand.Read(bytes)
@@ -382,54 +374,4 @@ func generateRandomID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(bytes), nil
-}
-
-// sanitizeFilename removes problematic characters from filename
-func sanitizeFilename(filename string) string {
-	// Replace problematic characters with underscores
-	reg := regexp.MustCompile(`[<>:"/\\|?*\x00-\x1f]`)
-	sanitized := reg.ReplaceAllString(filename, "_")
-
-	// Remove multiple consecutive underscores
-	reg = regexp.MustCompile(`_+`)
-	sanitized = reg.ReplaceAllString(sanitized, "_")
-
-	// Trim underscores from start and end
-	sanitized = strings.Trim(sanitized, "_")
-
-	// Ensure filename is not empty
-	if sanitized == "" {
-		sanitized = "unnamed"
-	}
-
-	return sanitized
-}
-
-// getContentTypeFromExtension returns the MIME type for a file extension
-func getContentTypeFromExtension(ext string) string {
-	switch strings.ToLower(ext) {
-	case ".pdf":
-		return "application/pdf"
-	case ".docx":
-		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-	case ".doc":
-		return "application/msword"
-	case ".pptx":
-		return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-	case ".ppt":
-		return "application/vnd.ms-powerpoint"
-	case ".txt":
-		return "text/plain"
-	default:
-		return "application/octet-stream"
-	}
-}
-
-func generateDocumentID(name string) string {
-	timestamp := strconv.FormatInt(time.Now().UnixNano(), 10)
-	clean := sanitizeFilename(name)
-	if clean == "" {
-		clean = "document"
-	}
-	return fmt.Sprintf("doc_%s_%s", timestamp, clean)
 }

@@ -12,14 +12,12 @@ import (
 	"time"
 )
 
-// openaiClassifier implements classification using OpenAI's API
 type openaiClassifier struct {
 	apiKey     string
 	model      string
 	httpClient *http.Client
 }
 
-// NewOpenAIClassifier creates a new OpenAI-based classifier
 func NewOpenAIClassifier(config *Config) (Classifier, error) {
 	if config.APIKey == "" {
 		return nil, fmt.Errorf("OpenAI API key is required")
@@ -44,7 +42,6 @@ func NewOpenAIClassifier(config *Config) (Classifier, error) {
 	}, nil
 }
 
-// Classify analyzes document text using OpenAI and returns classification results
 func (c *openaiClassifier) Classify(ctx context.Context, text string, metadata *DocumentMetadata) (*ClassificationResult, error) {
 	// Create the classification prompt
 	prompt := c.buildClassificationPrompt(text, metadata)
@@ -64,37 +61,33 @@ func (c *openaiClassifier) Classify(ctx context.Context, text string, metadata *
 	return result, nil
 }
 
-// GetSupportedCategories returns the categories this classifier can identify
 func (c *openaiClassifier) GetSupportedCategories() []string {
 	return GetDefaultCategories()
 }
 
-// IsConfigured returns true if the classifier is properly configured
 func (c *openaiClassifier) IsConfigured() bool {
 	return c.apiKey != "" && c.model != ""
 }
 
-// buildClassificationPrompt creates an enhanced prompt for OpenAI classification using unified prompts
 func (c *openaiClassifier) buildClassificationPrompt(text string, metadata *DocumentMetadata) string {
 	// Use the unified prompt builder with OpenAI-specific configuration
 	config := DefaultPromptConfigs["openai"]
 	if config == nil {
 		config = &PromptConfig{
-			Model:         c.model,
-			MaxTextLength: c.calculateOptimalTextLength(metadata),
+			Model:          c.model,
+			MaxTextLength:  c.calculateOptimalTextLength(metadata),
 			IncludeContext: true,
-			DetailLevel:   "comprehensive",
+			DetailLevel:    "comprehensive",
 		}
 	} else {
 		// Update max text length based on document characteristics
 		config.MaxTextLength = c.calculateOptimalTextLength(metadata)
 	}
-	
+
 	builder := NewPromptBuilder(config)
 	return builder.BuildClassificationPrompt(text, metadata)
 }
 
-// OpenAI API request/response structures
 type openaiRequest struct {
 	Model       string          `json:"model"`
 	Messages    []openaiMessage `json:"messages"`
@@ -119,7 +112,6 @@ type openaiResponse struct {
 	} `json:"error,omitempty"`
 }
 
-// makeOpenAIRequest sends a request to OpenAI's API with retry logic and rate limiting
 func (c *openaiClassifier) makeOpenAIRequest(ctx context.Context, prompt string) (string, error) {
 	const (
 		maxRetries = 5
@@ -135,7 +127,7 @@ func (c *openaiClassifier) makeOpenAIRequest(ctx context.Context, prompt string)
 			if delay > maxDelay {
 				delay = maxDelay
 			}
-			
+
 			select {
 			case <-ctx.Done():
 				return "", ctx.Err()
@@ -150,7 +142,7 @@ func (c *openaiClassifier) makeOpenAIRequest(ctx context.Context, prompt string)
 		}
 
 		lastErr = err
-		
+
 		// Check if this is a retryable error
 		if !c.isRetryableError(err) {
 			return "", err
@@ -160,7 +152,6 @@ func (c *openaiClassifier) makeOpenAIRequest(ctx context.Context, prompt string)
 	return "", fmt.Errorf("failed after %d attempts: %w", maxRetries, lastErr)
 }
 
-// doOpenAIRequest performs a single request to OpenAI's API
 func (c *openaiClassifier) doOpenAIRequest(ctx context.Context, prompt string) (string, error) {
 	reqBody := openaiRequest{
 		Model: c.model,
@@ -170,7 +161,7 @@ func (c *openaiClassifier) doOpenAIRequest(ctx context.Context, prompt string) (
 				Content: prompt,
 			},
 		},
-		Temperature: 0.1, // Low temperature for consistent results
+		Temperature: 0.1,  // Low temperature for consistent results
 		MaxTokens:   1500, // Increased for comprehensive responses
 	}
 
@@ -218,12 +209,11 @@ func (c *openaiClassifier) doOpenAIRequest(ctx context.Context, prompt string) (
 	return openaiResp.Choices[0].Message.Content, nil
 }
 
-// parseClassificationResponse parses the enhanced OpenAI response into a ClassificationResult
 func (c *openaiClassifier) parseClassificationResponse(response string) (*ClassificationResult, error) {
 	// Add debugging logs to see actual response
 	log.Printf("[OPENAI] Raw response length: %d chars", len(response))
 	log.Printf("[OPENAI] Raw response preview: %.200s...", response)
-	
+
 	// Try to extract JSON from the response (in case there's extra text)
 	jsonStart := strings.Index(response, "{")
 	jsonEnd := strings.LastIndex(response, "}") + 1
@@ -254,10 +244,10 @@ func (c *openaiClassifier) parseClassificationResponse(response string) (*Classi
 	if result.Confidence == 0 {
 		result.Confidence = 0.5 // Default confidence
 	}
-	
+
 	// Validate and parse dates using date extractor
 	dateExtractor := NewDateExtractor()
-	
+
 	// Validate each date field if present
 	if result.FilingDate != nil {
 		if !dateExtractor.validateDate(*result.FilingDate, "filing_date") {
@@ -324,7 +314,6 @@ func (c *openaiClassifier) parseClassificationResponse(response string) (*Classi
 	return &result, nil
 }
 
-// Helper functions for metadata access
 func getStringValue(metadata *DocumentMetadata, key string) string {
 	if metadata == nil {
 		return ""
@@ -362,22 +351,21 @@ func getIntValue(metadata *DocumentMetadata, key string) int {
 	}
 }
 
-// calculateOptimalTextLength determines the best text length based on document characteristics
 func (c *openaiClassifier) calculateOptimalTextLength(metadata *DocumentMetadata) int {
 	baseLength := 8000 // Conservative baseline
-	
+
 	if metadata == nil {
 		return baseLength
 	}
-	
+
 	// Adjust based on document size and page count
 	wordCount := metadata.WordCount
 	pageCount := metadata.PageCount
-	
+
 	switch {
 	case wordCount < 500: // Short documents
 		return baseLength // Use full text
-	case wordCount < 2000: // Medium documents  
+	case wordCount < 2000: // Medium documents
 		return baseLength + 2000 // Allow more text
 	case wordCount > 10000: // Large documents
 		return baseLength + 4000 // Increase significantly for complex docs
@@ -386,77 +374,4 @@ func (c *openaiClassifier) calculateOptimalTextLength(metadata *DocumentMetadata
 	default:
 		return baseLength
 	}
-}
-
-// generateContextualPrompt creates document-specific analysis instructions
-func (c *openaiClassifier) generateContextualPrompt(metadata *DocumentMetadata) string {
-	if metadata == nil {
-		return "CRITICAL INSTRUCTIONS:\n1. Classify document type from available types\n2. Provide substantive legal summary\n3. Extract legal entities with precision"
-	}
-	
-	wordCount := metadata.WordCount
-	pageCount := metadata.PageCount
-	
-	contextPrompt := "DOCUMENT ANALYSIS CONTEXT:\n"
-	
-	// Add analysis guidance based on document characteristics
-	switch {
-	case wordCount < 300:
-		contextPrompt += "- SHORT DOCUMENT: Focus on key identifying elements and brief classification\n"
-		contextPrompt += "- Prioritize document type identification over detailed extraction\n"
-	case wordCount > 5000:
-		contextPrompt += "- COMPREHENSIVE DOCUMENT: Perform detailed analysis and full entity extraction\n"
-		contextPrompt += "- Extract maximum legal detail including all parties, dates, and authorities\n"
-	case pageCount > 10:
-		contextPrompt += "- MULTI-PAGE DOCUMENT: Analyze structure and extract section-specific information\n"
-		contextPrompt += "- Look for procedural progression and case development over multiple sections\n"
-	default:
-		contextPrompt += "- STANDARD DOCUMENT: Perform balanced analysis with focus on legal substance\n"
-	}
-	
-	// Add specific guidance based on file type
-	fileType := strings.ToLower(metadata.FileType)
-	switch {
-	case strings.Contains(fileType, "pdf"):
-		contextPrompt += "- PDF DOCUMENT: May contain formatted legal text, pay attention to structure\n"
-	case strings.Contains(fileType, "docx"):
-		contextPrompt += "- WORD DOCUMENT: Likely draft or working document, analyze for intent and completeness\n"
-	case strings.Contains(fileType, "txt"):
-		contextPrompt += "- TEXT DOCUMENT: May lack formatting, focus on content analysis\n"
-	}
-	
-	return contextPrompt
-}
-
-// isRetryableError determines if an error should trigger a retry
-func (c *openaiClassifier) isRetryableError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	errStr := err.Error()
-
-	// Retry on rate limit errors (429)
-	if strings.Contains(errStr, "status 429") {
-		return true
-	}
-
-	// Retry on server errors (5xx)
-	if strings.Contains(errStr, "status 5") {
-		return true
-	}
-
-	// DO NOT retry on timeout errors - LLMs may need more time to respond
-	// Retrying on timeout wastes API credits by calling the same document multiple times
-	if strings.Contains(errStr, "timeout") || strings.Contains(errStr, "context deadline exceeded") {
-		return false
-	}
-
-	// Retry on connection errors (network failures, not timeouts)
-	if strings.Contains(errStr, "connection") || strings.Contains(errStr, "network") {
-		return true
-	}
-
-	// Don't retry on client errors (4xx except 429), authentication errors, etc.
-	return false
 }

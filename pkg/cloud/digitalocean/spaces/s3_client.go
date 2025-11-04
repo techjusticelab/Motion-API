@@ -3,20 +3,17 @@ package spaces
 import (
 	"context"
 	"fmt"
-	"io"
-	"net"
-	"net/http"
-	"time"
-
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-
+	"io"
 	"motion-index-fiber/pkg/storage"
+	"net"
+	"net/http"
+	"time"
 )
 
-// S3Client handles S3-compatible storage operations for DigitalOcean Spaces
 type S3Client interface {
 	// Core file operations
 	Upload(ctx context.Context, bucket, key string, content io.Reader, metadata *storage.UploadMetadata) (*storage.UploadResult, error)
@@ -40,14 +37,12 @@ type S3Client interface {
 	GetConnectionInfo() *ConnectionInfo
 }
 
-// BatchUploadItem represents a single item in a batch upload operation
 type BatchUploadItem struct {
 	Key      string                  `json:"key"`
 	Content  io.Reader               `json:"-"`
 	Metadata *storage.UploadMetadata `json:"metadata"`
 }
 
-// ConnectionInfo provides information about the S3 connection
 type ConnectionInfo struct {
 	Endpoint        string    `json:"endpoint"`
 	Region          string    `json:"region"`
@@ -58,7 +53,6 @@ type ConnectionInfo struct {
 	IsHealthy       bool      `json:"is_healthy"`
 }
 
-// S3Config contains configuration for S3-compatible client
 type S3Config struct {
 	AccessKey      string `json:"access_key"`
 	SecretKey      string `json:"secret_key"`
@@ -69,7 +63,6 @@ type S3Config struct {
 	ForcePathStyle bool   `json:"force_path_style"` // Required for DigitalOcean Spaces
 }
 
-// s3ClientImpl implements S3Client using AWS SDK v2
 type s3ClientImpl struct {
 	config      *S3Config
 	connInfo    *ConnectionInfo
@@ -77,7 +70,6 @@ type s3ClientImpl struct {
 	initialized bool
 }
 
-// NewS3Client creates a new S3-compatible client for DigitalOcean Spaces
 func NewS3Client(config *S3Config) (S3Client, error) {
 	if err := validateS3Config(config); err != nil {
 		return nil, fmt.Errorf("invalid S3 config: %w", err)
@@ -99,7 +91,7 @@ func NewS3Client(config *S3Config) (S3Client, error) {
 	// Initialize actual AWS S3 client for DigitalOcean Spaces
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	
+
 	// Use a custom HTTP client with reasonable timeouts for DigitalOcean Spaces
 	httpClient := &http.Client{
 		Timeout: 30 * time.Second,
@@ -107,14 +99,14 @@ func NewS3Client(config *S3Config) (S3Client, error) {
 			DialContext: (&net.Dialer{
 				Timeout: 10 * time.Second,
 			}).DialContext,
-			TLSHandshakeTimeout: 10 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
 			ResponseHeaderTimeout: 15 * time.Second,
-			IdleConnTimeout: 30 * time.Second,
-			MaxIdleConns: 10,
-			MaxIdleConnsPerHost: 10,
+			IdleConnTimeout:       30 * time.Second,
+			MaxIdleConns:          10,
+			MaxIdleConnsPerHost:   10,
 		},
 	}
-	
+
 	awsConfig, err := awsconfig.LoadDefaultConfig(ctx,
 		awsconfig.WithRegion(client.config.Region),
 		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
@@ -146,8 +138,6 @@ func NewS3Client(config *S3Config) (S3Client, error) {
 	client.initialized = true
 	return client, nil
 }
-
-// Core file operations
 
 func (c *s3ClientImpl) Upload(ctx context.Context, bucket, key string, content io.Reader, metadata *storage.UploadMetadata) (*storage.UploadResult, error) {
 	if !c.initialized {
@@ -198,8 +188,6 @@ func (c *s3ClientImpl) Delete(ctx context.Context, bucket, key string) error {
 	return fmt.Errorf("S3 delete not yet implemented")
 }
 
-// File management
-
 func (c *s3ClientImpl) Exists(ctx context.Context, bucket, key string) (bool, error) {
 	if !c.initialized {
 		return false, fmt.Errorf("S3 client not initialized")
@@ -249,8 +237,6 @@ func (c *s3ClientImpl) List(ctx context.Context, bucket, prefix string, maxKeys 
 	return objects, nil
 }
 
-// URL generation
-
 func (c *s3ClientImpl) GetPublicURL(bucket, key string, useSSL bool) string {
 	protocol := "https"
 	if !useSSL {
@@ -283,8 +269,6 @@ func (c *s3ClientImpl) GetSignedURL(ctx context.Context, bucket, key string, exp
 
 	return "", fmt.Errorf("S3 signed URL generation not yet implemented")
 }
-
-// Batch operations
 
 func (c *s3ClientImpl) BatchUpload(ctx context.Context, bucket string, uploads []*BatchUploadItem) ([]*storage.UploadResult, error) {
 	if !c.initialized {
@@ -327,8 +311,6 @@ func (c *s3ClientImpl) BatchDelete(ctx context.Context, bucket string, keys []st
 	return fmt.Errorf("S3 batch delete not yet implemented")
 }
 
-// Health and connectivity
-
 func (c *s3ClientImpl) IsHealthy(ctx context.Context) bool {
 	if !c.initialized {
 		return false
@@ -352,8 +334,6 @@ func (c *s3ClientImpl) GetConnectionInfo() *ConnectionInfo {
 	return c.connInfo
 }
 
-// Validation and helper functions
-
 func validateS3Config(config *S3Config) error {
 	if config == nil {
 		return fmt.Errorf("config cannot be nil")
@@ -376,7 +356,6 @@ func validateS3Config(config *S3Config) error {
 	return nil
 }
 
-// S3Error represents errors from S3 operations
 type S3Error struct {
 	Operation string
 	Bucket    string
@@ -396,7 +375,6 @@ func (e *S3Error) Unwrap() error {
 	return e.Cause
 }
 
-// NewS3Error creates a new S3 error
 func NewS3Error(operation, bucket, key, message string, cause error) *S3Error {
 	return &S3Error{
 		Operation: operation,

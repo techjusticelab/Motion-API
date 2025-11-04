@@ -10,7 +10,6 @@ import (
 	"time"
 )
 
-// DOAPIClient handles direct DigitalOcean API operations
 type DOAPIClient interface {
 	// CDN Management
 	CreateCDN(ctx context.Context, origin string, ttl int) (*CDNInfo, error)
@@ -27,21 +26,19 @@ type DOAPIClient interface {
 	DeleteSpacesKey(ctx context.Context, accessKey string) error
 }
 
-// doAPIClientImpl implements DOAPIClient using direct DigitalOcean REST API calls
 type doAPIClientImpl struct {
 	apiToken   string
 	httpClient *http.Client
 	baseURL    string
-	
+
 	// Cache for CDN information to reduce API calls
 	cdnCache map[string]*CDNInfo
-	
+
 	// Performance tracking
 	lastAPICall time.Time
 	apiCalls    int64
 }
 
-// NewDOAPIClient creates a new DigitalOcean API client
 func NewDOAPIClient(apiToken string) DOAPIClient {
 	return &doAPIClientImpl{
 		apiToken: apiToken,
@@ -54,7 +51,6 @@ func NewDOAPIClient(apiToken string) DOAPIClient {
 	}
 }
 
-// makeAPIRequest makes a request to the DigitalOcean API
 func (c *doAPIClientImpl) makeAPIRequest(ctx context.Context, method, endpoint string, body interface{}) (*http.Response, error) {
 	c.apiCalls++
 	c.lastAPICall = time.Now()
@@ -87,7 +83,6 @@ func (c *doAPIClientImpl) makeAPIRequest(ctx context.Context, method, endpoint s
 	return resp, nil
 }
 
-// parseAPIResponse parses an API response into the target structure
 func (c *doAPIClientImpl) parseAPIResponse(resp *http.Response, target interface{}) error {
 	defer resp.Body.Close()
 
@@ -108,15 +103,13 @@ func (c *doAPIClientImpl) parseAPIResponse(resp *http.Response, target interface
 	return nil
 }
 
-// CDN Management Implementation
-
 func (c *doAPIClientImpl) CreateCDN(ctx context.Context, origin string, ttl int) (*CDNInfo, error) {
 	if origin == "" {
 		return nil, fmt.Errorf("origin cannot be empty")
 	}
 
 	requestBody := map[string]interface{}{
-		"type":   "cdn",
+		"type": "cdn",
 		"config": map[string]interface{}{
 			"origin": origin,
 			"ttl":    ttl,
@@ -237,7 +230,7 @@ func (c *doAPIClientImpl) ListCDNs(ctx context.Context) ([]*CDNInfo, error) {
 			CreatedAt: ep.Created,
 		}
 		cdns[i] = cdnInfo
-		
+
 		// Update cache
 		c.cdnCache[cdnInfo.ID] = cdnInfo
 	}
@@ -287,8 +280,6 @@ func (c *doAPIClientImpl) FlushCDNCache(ctx context.Context, cdnID string, files
 
 	return c.parseAPIResponse(resp, nil)
 }
-
-// Access Key Management Implementation
 
 func (c *doAPIClientImpl) CreateSpacesKey(ctx context.Context, name string) (*SpacesKey, error) {
 	if name == "" {
@@ -385,73 +376,4 @@ func (c *doAPIClientImpl) ListSpacesKeys(ctx context.Context) ([]*SpacesKey, err
 	}
 
 	return keys, nil
-}
-
-func (c *doAPIClientImpl) UpdateSpacesKey(ctx context.Context, accessKey, name string) (*SpacesKey, error) {
-	if accessKey == "" {
-		return nil, fmt.Errorf("access key cannot be empty")
-	}
-	if name == "" {
-		return nil, fmt.Errorf("name cannot be empty")
-	}
-
-	requestBody := map[string]interface{}{
-		"name": name,
-	}
-
-	resp, err := c.makeAPIRequest(ctx, "PUT", "/spaces/keys/"+accessKey, requestBody)
-	if err != nil {
-		return nil, fmt.Errorf("failed to update Spaces key: %w", err)
-	}
-
-	var result struct {
-		AccessKey struct {
-			Name      string    `json:"name"`
-			AccessKey string    `json:"access_key_id"`
-			CreatedAt time.Time `json:"created_at"`
-		} `json:"access_key"`
-	}
-
-	if err := c.parseAPIResponse(resp, &result); err != nil {
-		return nil, err
-	}
-
-	return &SpacesKey{
-		Name:      result.AccessKey.Name,
-		AccessKey: result.AccessKey.AccessKey,
-		CreatedAt: result.AccessKey.CreatedAt,
-		Grants:    []*KeyGrant{}, // DigitalOcean Spaces keys have full access
-	}, nil
-}
-
-func (c *doAPIClientImpl) DeleteSpacesKey(ctx context.Context, accessKey string) error {
-	if accessKey == "" {
-		return fmt.Errorf("access key cannot be empty")
-	}
-
-	resp, err := c.makeAPIRequest(ctx, "DELETE", "/spaces/keys/"+accessKey, nil)
-	if err != nil {
-		return fmt.Errorf("failed to delete Spaces key: %w", err)
-	}
-
-	return c.parseAPIResponse(resp, nil)
-}
-
-// Helper methods
-
-// getCDNFromCache retrieves a CDN from cache by ID
-func (c *doAPIClientImpl) getCDNFromCache(cdnID string) (*CDNInfo, bool) {
-	cdn, exists := c.cdnCache[cdnID]
-	return cdn, exists
-}
-
-// GetMetrics returns performance metrics for the API client
-func (c *doAPIClientImpl) GetMetrics() map[string]interface{} {
-	return map[string]interface{}{
-		"api_calls":       c.apiCalls,
-		"last_api_call":   c.lastAPICall,
-		"cached_cdns":     len(c.cdnCache),
-		"base_url":        c.baseURL,
-		"client_timeout":  c.httpClient.Timeout.Seconds(),
-	}
 }
