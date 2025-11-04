@@ -1,3 +1,6 @@
+//go:build ignore
+// +build ignore
+
 package main
 
 import (
@@ -101,7 +104,7 @@ func runUpload(args []string) error {
 		defaultMaxSize = 50 * 1024 * 1024
 	}
 
-	defaultBatchSize := envInt("MASS_UPLOAD_BATCH_SIZE", 50)
+	defaultBatchSize := envInt("MASS_UPLOAD_BATCH_SIZE", 10)
 	if defaultBatchSize < 0 {
 		defaultBatchSize = 0
 	}
@@ -121,7 +124,7 @@ func runUpload(args []string) error {
 	retryDelay := fs.Duration("retry-delay", defaultRetryDelay, "Delay between retries (e.g. 2s, 1m)")
 	timeout := fs.Duration("timeout", defaultTimeout, "HTTP timeout per file (e.g. 5m)")
 	maxSizeFlag := fs.String("max-size", formatByteSize(defaultMaxSize), "Maximum file size to upload (e.g. 50MB, 100M, 52428800)")
-	batchSizeFlag := fs.Int("batch-size", defaultBatchSize, "Number of files to upload per batch (0 = all)" )
+	batchSizeFlag := fs.Int("batch-size", defaultBatchSize, "Number of files to upload per batch (0 = all)")
 	batchDelayFlag := fs.Duration("batch-delay", defaultBatchDelay, "Optional delay between batches (e.g. 15s)")
 
 	fs.Usage = func() {
@@ -227,6 +230,11 @@ func runUpload(args []string) error {
 	client := &http.Client{Timeout: httpTimeout}
 	totalFiles := len(jobs)
 
+	filesPerBatch := batchSize
+	if filesPerBatch <= 0 || filesPerBatch > totalFiles {
+		filesPerBatch = totalFiles
+	}
+
 	fmt.Printf("Starting upload of files to API from: %s\n", absTarget)
 	fmt.Printf("API Endpoint: %s\n", endpointURL)
 	fmt.Println("-------------------------------------------------------")
@@ -238,20 +246,8 @@ func runUpload(args []string) error {
 		fmt.Printf(" (%d skipped for size > %s)", len(skippedOversize), formatByteSize(maxSizeBytes))
 	}
 	fmt.Println()
-	fmt.Printf("Max concurrency: %d | Retries per file: %d | Timeout: %s\n", conc, retryCount, httpTimeout)
-	if batchSize > 0 {
-		batchDelayText := "0s"
-		if batchDelay > 0 {
-			batchDelayText = batchDelay.String()
-		}
-		fmt.Printf("Batch size: %d | Batch delay: %s\n", batchSize, batchDelayText)
-	} else {
-		fmt.Println("Batch size: unlimited (processing all files in a single run)")
-	}
-	fmt.Println("-------------------------------------------------------")
-
-	if batchSize > 0 && conc > batchSize {
-		conc = batchSize
+	if filesPerBatch > 0 && conc > filesPerBatch {
+		conc = filesPerBatch
 	}
 	if conc > totalFiles {
 		conc = totalFiles
@@ -259,6 +255,18 @@ func runUpload(args []string) error {
 	if conc < 1 {
 		conc = 1
 	}
+
+	fmt.Printf("Max concurrency: %d | Retries per file: %d | Timeout: %s\n", conc, retryCount, httpTimeout)
+	if filesPerBatch < totalFiles {
+		batchDelayText := "0s"
+		if batchDelay > 0 {
+			batchDelayText = batchDelay.String()
+		}
+		fmt.Printf("Batch size: %d | Batch delay: %s\n", filesPerBatch, batchDelayText)
+	} else {
+		fmt.Println("Batch size: unlimited (processing all files in a single run)")
+	}
+	fmt.Println("-------------------------------------------------------")
 
 	jobsCh := make(chan uploadJob, conc)
 	resultsCh := make(chan uploadResult, conc)
@@ -303,11 +311,6 @@ func runUpload(args []string) error {
 	failed := 0
 	totalRetriesUsed := 0
 	var failedDetails []string
-
-	filesPerBatch := batchSize
-	if filesPerBatch <= 0 || filesPerBatch >= totalFiles {
-		filesPerBatch = totalFiles
-	}
 
 	batchCount := (totalFiles + filesPerBatch - 1) / filesPerBatch
 
@@ -584,6 +587,8 @@ func printUploadUsage(fs *flag.FlagSet) {
 	fmt.Println("  MASS_UPLOAD_RETRY_DELAY       - Default retry delay (duration or seconds)")
 	fmt.Println("  MASS_UPLOAD_TIMEOUT           - Default request timeout (duration or seconds)")
 	fmt.Println("  MASS_UPLOAD_MAX_SIZE          - Maximum file size (e.g. 50MB, 1048576)")
+	fmt.Println("  MASS_UPLOAD_BATCH_SIZE        - Default files per batch (0 = all)")
+	fmt.Println("  MASS_UPLOAD_BATCH_DELAY       - Default delay between batches (duration or seconds)")
 }
 
 func supportedExtensionsList() []string {
