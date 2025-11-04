@@ -3,7 +3,6 @@ package extractor
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"strings"
 )
@@ -26,47 +25,15 @@ func (e *pptExtractor) Extract(ctx context.Context, reader io.Reader, metadata *
 	// PPT files may actually be PPTX archives
 	if bytes.HasPrefix(content, []byte("PK")) {
 		pptxExtractor := NewPPTXExtractor()
-		result, err := pptxExtractor.Extract(ctx, bytes.NewReader(content), metadata)
-		if err == nil && result != nil && strings.TrimSpace(result.Text) != "" {
-			if result.Metadata == nil {
-				result.Metadata = map[string]interface{}{}
-			}
-			result.Metadata["original_format"] = "ppt"
-			result.Metadata["detected_archive"] = true
-			return result, nil
-		}
+		return pptxExtractor.Extract(ctx, bytes.NewReader(content), metadata)
 	}
 
-	text, conversionErr := convertWithLibreOffice(ctx, content, "ppt")
-	if strings.TrimSpace(text) == "" {
-		decoded := decodeUTF16LE(content)
-		if strings.TrimSpace(decoded) == "" {
-			if conversionErr != nil {
-				return nil, NewExtractionError("ppt", "failed to convert PPT to text", conversionErr)
-			}
-			return nil, NewExtractionError("ppt", "no text extracted from PPT document", errors.New("empty text content"))
-		}
-		text = decoded
+	result, err := extractTextFromConvertedPDF(ctx, content, metadata, "ppt")
+	if err != nil {
+		return nil, NewExtractionError("ppt", "failed to extract text from converted PDF", err)
 	}
 
-	cleaner := NewTextCleaner(DefaultCleaningConfig())
-	text = cleaner.CleanText(text)
-
-	wordCount := countWords(text)
-	charCount := len(text)
-
-	return &ExtractionResult{
-		Text:      text,
-		WordCount: wordCount,
-		CharCount: charCount,
-		PageCount: 0,
-		Success:   true,
-		Metadata: map[string]interface{}{
-			"format":          "ppt",
-			"file_size":       len(content),
-			"conversion_tool": "libreoffice",
-		},
-	}, nil
+	return result, nil
 }
 
 // SupportedFormats returns supported formats for PPT extractor

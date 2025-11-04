@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -32,6 +34,7 @@ type DryClassificationHandler struct {
 	storageService   pkgstorage.Service
 	searchService    pkgsearch.Service
 	extractorService pkgextractor.Service
+	jobQueue         *dryJobQueue
 }
 
 // NewDryClassificationHandler creates a new dry classification handler.
@@ -41,12 +44,14 @@ func NewDryClassificationHandler(
 	searchService pkgsearch.Service,
 	extractorService pkgextractor.Service,
 ) *DryClassificationHandler {
-	return &DryClassificationHandler{
+	h := &DryClassificationHandler{
 		cfg:              cfg,
 		storageService:   storageService,
 		searchService:    searchService,
 		extractorService: extractorService,
 	}
+	h.jobQueue = newDryJobQueue(h.processDryJob)
+	return h
 }
 
 // Run handles the dry classification workflow.
@@ -68,7 +73,7 @@ func (h *DryClassificationHandler) Run(c *fiber.Ctx) error {
 		))
 	}
 
-	file, err := fileHeader.Open()
+	src, err := fileHeader.Open()
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(internalmodels.NewErrorResponse(
 			"file_open_failed",
@@ -76,10 +81,22 @@ func (h *DryClassificationHandler) Run(c *fiber.Ctx) error {
 			map[string]interface{}{"error": err.Error()},
 		))
 	}
-	defer file.Close()
+	defer src.Close()
 
-	originalBytes, err := io.ReadAll(file)
+	tempFile, err := os.CreateTemp("", "dry-upload-*")
 	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(internalmodels.NewErrorResponse(
+			"tempfile_creation_failed",
+			"Failed to create temporary storage for upload",
+			map[string]interface{}{"error": err.Error()},
+		))
+	}
+	tempPath := tempFile.Name()
+
+	written, err := io.Copy(tempFile, src)
+	tempFile.Close()
+	if err != nil {
+		os.Remove(tempPath)
 		return c.Status(fiber.StatusBadRequest).JSON(internalmodels.NewErrorResponse(
 			"file_read_failed",
 			"Failed to read uploaded file",
@@ -87,48 +104,109 @@ func (h *DryClassificationHandler) Run(c *fiber.Ctx) error {
 		))
 	}
 
-	ctx, cancel := context.WithTimeout(c.Context(), 5*time.Minute)
-	defer cancel()
-
-	originalExt := strings.ToLower(filepath.Ext(fileHeader.Filename))
 	contentType := fileHeader.Header.Get("Content-Type")
 	if contentType == "" {
 		contentType = pkgstorage.GetContentTypeFromFilename(fileHeader.Filename)
 	}
 
+	payload := &dryJobPayload{
+		FileName:    fileHeader.Filename,
+		ContentType: contentType,
+		Size:        written,
+		TempPath:    tempPath,
+	}
+
+	result, submitErr := h.jobQueue.Submit(c.Context(), payload)
+	if submitErr != nil {
+		os.Remove(tempPath)
+		if errors.Is(submitErr, context.Canceled) || errors.Is(submitErr, context.DeadlineExceeded) {
+			return c.Status(fiber.StatusRequestTimeout).JSON(internalmodels.NewErrorResponse(
+				"request_cancelled",
+				"Request cancelled while waiting in processing queue",
+				nil,
+			))
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(internalmodels.NewErrorResponse(
+			"queue_error",
+			"Failed to enqueue processing job",
+			map[string]interface{}{"error": submitErr.Error()},
+		))
+	}
+
+	return c.Status(result.status).JSON(result.body)
+}
+
+func (h *DryClassificationHandler) processDryJob(job *dryJob) dryJobResult {
+	defer os.Remove(job.payload.TempPath)
+
+	if job.ctx.Err() != nil {
+		return dryJobResult{
+			status: fiber.StatusRequestTimeout,
+			body: internalmodels.NewErrorResponse(
+				"request_cancelled",
+				"Request context cancelled before processing",
+				nil,
+			),
+			err: job.ctx.Err(),
+		}
+	}
+
+	data, err := os.ReadFile(job.payload.TempPath)
+	if err != nil {
+		return dryJobResult{
+			status: fiber.StatusInternalServerError,
+			body: internalmodels.NewErrorResponse(
+				"file_read_failed",
+				"Failed to read temporary file for processing",
+				map[string]interface{}{"error": err.Error()},
+			),
+			err: err,
+		}
+	}
+
+	originalExt := strings.ToLower(filepath.Ext(job.payload.FileName))
+	ctx, cancel := context.WithTimeout(job.ctx, 5*time.Minute)
+	defer cancel()
+
 	extractionMetadata := &pkgextractor.DocumentMetadata{
-		FileName: fileHeader.Filename,
-		MimeType: contentType,
-		Size:     fileHeader.Size,
+		FileName: job.payload.FileName,
+		MimeType: job.payload.ContentType,
+		Size:     job.payload.Size,
 		Format:   strings.TrimPrefix(originalExt, "."),
 	}
 
-	// Step 1: Extract text from original format (needed for PDF generation)
-	intermediateExtraction, err := h.extractorService.ExtractText(ctx, bytes.NewReader(originalBytes), extractionMetadata)
+	intermediateExtraction, err := h.extractorService.ExtractText(ctx, bytes.NewReader(data), extractionMetadata)
 	if err != nil || intermediateExtraction == nil {
 		reason := "Failed to extract text from document"
 		if err != nil {
 			reason = err.Error()
 		}
-		return c.Status(fiber.StatusInternalServerError).JSON(internalmodels.NewErrorResponse(
-			"extraction_failed",
-			reason,
-			map[string]interface{}{"file": fileHeader.Filename},
-		))
+		return dryJobResult{
+			status: fiber.StatusInternalServerError,
+			body: internalmodels.NewErrorResponse(
+				"extraction_failed",
+				reason,
+				map[string]interface{}{"file": job.payload.FileName},
+			),
+			err: err,
+		}
 	}
 
-	// Step 2: Generate PDF from extracted text
-	pdfBytes, err := h.ensurePDFBytes(originalBytes, originalExt, intermediateExtraction.Text)
+	pdfBytes, err := h.ensurePDFBytes(data, originalExt, intermediateExtraction.Text)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(internalmodels.NewErrorResponse(
-			"pdf_conversion_failed",
-			err.Error(),
-			nil,
-		))
+		return dryJobResult{
+			status: fiber.StatusInternalServerError,
+			body: internalmodels.NewErrorResponse(
+				"pdf_conversion_failed",
+				err.Error(),
+				nil,
+			),
+			err: err,
+		}
 	}
 
 	documentID := uuid.New().String()
-	sanitizedName := sanitizeFilename(strings.TrimSuffix(fileHeader.Filename, originalExt))
+	sanitizedName := sanitizeFilename(strings.TrimSuffix(job.payload.FileName, originalExt))
 	storagePath := fmt.Sprintf("dry-classification/%s_%s.pdf", documentID, sanitizedName)
 
 	uploadMetadata := &pkgstorage.UploadMetadata{
@@ -142,58 +220,39 @@ func (h *DryClassificationHandler) Run(c *fiber.Ctx) error {
 
 	uploadResult, err := h.storageService.Upload(ctx, storagePath, bytes.NewReader(pdfBytes), uploadMetadata)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(internalmodels.NewErrorResponse(
-			"upload_failed",
-			"Failed to upload converted PDF to storage",
-			map[string]interface{}{"error": err.Error()},
-		))
+		return dryJobResult{
+			status: fiber.StatusInternalServerError,
+			body: internalmodels.NewErrorResponse(
+				"upload_failed",
+				"Failed to upload converted PDF to storage",
+				map[string]interface{}{"error": err.Error()},
+			),
+			err: err,
+		}
 	}
 
-	// Step 3: Use appropriate text extraction based on original format
 	var finalExtraction *pkgextractor.ExtractionResult
 
 	if strings.EqualFold(originalExt, ".pdf") {
-		// Original was PDF - extract from the PDF
-		pdfMetadata := &pkgextractor.DocumentMetadata{
-			FileName: fmt.Sprintf("%s.pdf", sanitizedName),
-			MimeType: "application/pdf",
-			Size:     int64(len(pdfBytes)),
-			Format:   "pdf",
-		}
-
-		var err error
-		finalExtraction, err = h.extractorService.ExtractText(ctx, bytes.NewReader(pdfBytes), pdfMetadata)
-		if err != nil || finalExtraction == nil {
-			reason := "Failed to extract text from PDF"
-			if err != nil {
-				reason = err.Error()
-			}
-			return c.Status(fiber.StatusInternalServerError).JSON(internalmodels.NewErrorResponse(
-				"pdf_extraction_failed",
-				reason,
-				map[string]interface{}{"storage_path": storagePath},
-			))
-		}
+		finalExtraction = intermediateExtraction
 	} else {
-		// Generated PDF from DOC/DOCX/PPT/PPTX/TXT - use intermediate extraction
-		// (gofpdf-generated PDFs don't extract properly, causing garbled text)
 		finalExtraction = intermediateExtraction
 	}
 
 	docHash := hashBytes(pdfBytes)
 	now := time.Now()
 	metadata := pkgmodels.NewDocumentMetadata()
-	metadata.DocumentName = fileHeader.Filename
+	metadata.DocumentName = job.payload.FileName
 	metadata.ProcessedAt = now
 	metadata.AIClassified = false
 
 	document := &pkgmodels.Document{
 		ID:          documentID,
-		FileName:    fileHeader.Filename,
+		FileName:    job.payload.FileName,
 		FilePath:    storagePath,
 		FileURL:     h.storageService.GetURL(storagePath),
 		S3URI:       buildS3URI(h.cfg, storagePath),
-		Text:        finalExtraction.Text, // Use text extracted from PDF
+		Text:        finalExtraction.Text,
 		Hash:        docHash,
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -203,11 +262,15 @@ func (h *DryClassificationHandler) Run(c *fiber.Ctx) error {
 	}
 
 	if _, err := h.searchService.IndexDocument(ctx, document); err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(internalmodels.NewErrorResponse(
-			"indexing_failed",
-			"Failed to push document to OpenSearch",
-			map[string]interface{}{"error": err.Error()},
-		))
+		return dryJobResult{
+			status: fiber.StatusInternalServerError,
+			body: internalmodels.NewErrorResponse(
+				"indexing_failed",
+				"Failed to push document to OpenSearch",
+				map[string]interface{}{"error": err.Error()},
+			),
+			err: err,
+		}
 	}
 
 	response := fiber.Map{
@@ -215,14 +278,18 @@ func (h *DryClassificationHandler) Run(c *fiber.Ctx) error {
 		"storage_path":   storagePath,
 		"file_url":       uploadResult.URL,
 		"cdn_url":        h.storageService.GetURL(storagePath),
-		"original_name":  fileHeader.Filename,
+		"original_name":  job.payload.FileName,
 		"text_chars":     len(finalExtraction.Text),
 		"word_count":     finalExtraction.WordCount,
 		"page_count":     finalExtraction.PageCount,
 		"classification": fiber.Map{},
 	}
 
-	return c.Status(fiber.StatusCreated).JSON(internalmodels.NewSuccessResponse(response, "Document processed successfully"))
+	return dryJobResult{
+		status: fiber.StatusCreated,
+		body:   internalmodels.NewSuccessResponse(response, "Document processed successfully"),
+		err:    nil,
+	}
 }
 
 func (h *DryClassificationHandler) ensurePDFBytes(original []byte, ext string, text string) ([]byte, error) {

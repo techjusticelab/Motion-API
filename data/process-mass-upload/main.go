@@ -101,6 +101,16 @@ func runUpload(args []string) error {
 		defaultMaxSize = 50 * 1024 * 1024
 	}
 
+	defaultBatchSize := envInt("MASS_UPLOAD_BATCH_SIZE", 50)
+	if defaultBatchSize < 0 {
+		defaultBatchSize = 0
+	}
+
+	defaultBatchDelay := envDuration("MASS_UPLOAD_BATCH_DELAY", 0)
+	if defaultBatchDelay < 0 {
+		defaultBatchDelay = 0
+	}
+
 	fs := flag.NewFlagSet("upload", flag.ContinueOnError)
 	fs.SetOutput(os.Stdout)
 
@@ -111,6 +121,8 @@ func runUpload(args []string) error {
 	retryDelay := fs.Duration("retry-delay", defaultRetryDelay, "Delay between retries (e.g. 2s, 1m)")
 	timeout := fs.Duration("timeout", defaultTimeout, "HTTP timeout per file (e.g. 5m)")
 	maxSizeFlag := fs.String("max-size", formatByteSize(defaultMaxSize), "Maximum file size to upload (e.g. 50MB, 100M, 52428800)")
+	batchSizeFlag := fs.Int("batch-size", defaultBatchSize, "Number of files to upload per batch (0 = all)" )
+	batchDelayFlag := fs.Duration("batch-delay", defaultBatchDelay, "Optional delay between batches (e.g. 15s)")
 
 	fs.Usage = func() {
 		printUploadUsage(fs)
@@ -192,6 +204,16 @@ func runUpload(args []string) error {
 		httpTimeout = defaultTimeout
 	}
 
+	batchSize := *batchSizeFlag
+	if batchSize < 0 {
+		batchSize = 0
+	}
+
+	batchDelay := *batchDelayFlag
+	if batchDelay < 0 {
+		batchDelay = 0
+	}
+
 	endpointURL := strings.TrimSpace(*endpoint)
 	if endpointURL == "" {
 		endpointURL = defaultEndpoint
@@ -217,55 +239,64 @@ func runUpload(args []string) error {
 	}
 	fmt.Println()
 	fmt.Printf("Max concurrency: %d | Retries per file: %d | Timeout: %s\n", conc, retryCount, httpTimeout)
+	if batchSize > 0 {
+		batchDelayText := "0s"
+		if batchDelay > 0 {
+			batchDelayText = batchDelay.String()
+		}
+		fmt.Printf("Batch size: %d | Batch delay: %s\n", batchSize, batchDelayText)
+	} else {
+		fmt.Println("Batch size: unlimited (processing all files in a single run)")
+	}
 	fmt.Println("-------------------------------------------------------")
 
+	if batchSize > 0 && conc > batchSize {
+		conc = batchSize
+	}
+	if conc > totalFiles {
+		conc = totalFiles
+	}
+	if conc < 1 {
+		conc = 1
+	}
+
 	jobsCh := make(chan uploadJob, conc)
-	resultsCh := make(chan uploadResult, totalFiles)
+	resultsCh := make(chan uploadResult, conc)
 
 	var wg sync.WaitGroup
 	maxAttempts := retryCount + 1
 	startTime := time.Now()
 
-	for i := 0; i < conc; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for job := range jobsCh {
-				var attemptErr error
-				attemptsUsed := 0
+	worker := func() {
+		defer wg.Done()
+		for job := range jobsCh {
+			var attemptErr error
+			attemptsUsed := 0
 
-				for attempt := 1; attempt <= maxAttempts; attempt++ {
-					attemptsUsed = attempt
-					attemptErr = apihelpers.UploadFile(client, endpointURL, job.path, filepath.Base(job.path))
-					if attemptErr == nil {
-						resultsCh <- uploadResult{job: job, attempts: attemptsUsed}
-						break
-					}
-
-					if attempt < maxAttempts {
-						fmt.Printf("↻ Retry %d/%d for %s: %v\n", attempt, retryCount, job.display, attemptErr)
-						time.Sleep(delay)
-					}
+			for attempt := 1; attempt <= maxAttempts; attempt++ {
+				attemptsUsed = attempt
+				attemptErr = apihelpers.UploadFile(client, endpointURL, job.path, filepath.Base(job.path))
+				if attemptErr == nil {
+					resultsCh <- uploadResult{job: job, attempts: attemptsUsed}
+					break
 				}
 
-				if attemptErr != nil {
-					resultsCh <- uploadResult{job: job, attempts: attemptsUsed, err: attemptErr}
+				if attempt < maxAttempts {
+					fmt.Printf("↻ Retry %d/%d for %s: %v\n", attempt, retryCount, job.display, attemptErr)
+					time.Sleep(delay)
 				}
 			}
-		}()
+
+			if attemptErr != nil {
+				resultsCh <- uploadResult{job: job, attempts: attemptsUsed, err: attemptErr}
+			}
+		}
 	}
 
-	go func() {
-		for _, job := range jobs {
-			jobsCh <- job
-		}
-		close(jobsCh)
-	}()
-
-	go func() {
-		wg.Wait()
-		close(resultsCh)
-	}()
+	for i := 0; i < conc; i++ {
+		wg.Add(1)
+		go worker()
+	}
 
 	processed := 0
 	successful := 0
@@ -273,28 +304,61 @@ func runUpload(args []string) error {
 	totalRetriesUsed := 0
 	var failedDetails []string
 
-	for result := range resultsCh {
-		processed++
-		retriesUsed := 0
-		if result.attempts > 0 {
-			retriesUsed = result.attempts - 1
-		}
-		totalRetriesUsed += retriesUsed
-
-		if result.err == nil {
-			if retriesUsed > 0 {
-				fmt.Printf("[%d/%d] ✓ Uploaded: %s (retries: %d)\n", processed, totalFiles, result.job.display, retriesUsed)
-			} else {
-				fmt.Printf("[%d/%d] ✓ Uploaded: %s\n", processed, totalFiles, result.job.display)
-			}
-			successful++
-			continue
-		}
-
-		fmt.Printf("[%d/%d] ✗ Failed: %s - %v\n", processed, totalFiles, result.job.display, result.err)
-		failed++
-		failedDetails = append(failedDetails, fmt.Sprintf("%s: %v", result.job.display, result.err))
+	filesPerBatch := batchSize
+	if filesPerBatch <= 0 || filesPerBatch >= totalFiles {
+		filesPerBatch = totalFiles
 	}
+
+	batchCount := (totalFiles + filesPerBatch - 1) / filesPerBatch
+
+	for batchIndex, start := 0, 0; start < totalFiles; batchIndex++ {
+		end := start + filesPerBatch
+		if end > totalFiles {
+			end = totalFiles
+		}
+
+		if batchCount > 1 {
+			fmt.Printf(">>> Batch %d/%d: uploading %d files\n", batchIndex+1, batchCount, end-start)
+		}
+
+		for _, job := range jobs[start:end] {
+			jobsCh <- job
+		}
+
+		for i := start; i < end; i++ {
+			result := <-resultsCh
+			processed++
+			retriesUsed := 0
+			if result.attempts > 0 {
+				retriesUsed = result.attempts - 1
+			}
+			totalRetriesUsed += retriesUsed
+
+			if result.err == nil {
+				if retriesUsed > 0 {
+					fmt.Printf("[%d/%d] ✓ Uploaded: %s (retries: %d)\n", processed, totalFiles, result.job.display, retriesUsed)
+				} else {
+					fmt.Printf("[%d/%d] ✓ Uploaded: %s\n", processed, totalFiles, result.job.display)
+				}
+				successful++
+			} else {
+				fmt.Printf("[%d/%d] ✗ Failed: %s - %v\n", processed, totalFiles, result.job.display, result.err)
+				failed++
+				failedDetails = append(failedDetails, fmt.Sprintf("%s: %v", result.job.display, result.err))
+			}
+		}
+
+		if batchDelay > 0 && batchCount > 1 && end < totalFiles {
+			fmt.Printf("Waiting %s before next batch...\n", batchDelay)
+			time.Sleep(batchDelay)
+		}
+
+		start = end
+	}
+
+	close(jobsCh)
+	wg.Wait()
+	close(resultsCh)
 
 	duration := time.Since(startTime)
 	fmt.Println("-------------------------------------------------------")

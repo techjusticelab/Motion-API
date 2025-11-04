@@ -31,16 +31,16 @@ func (e *pdfExtractor) Extract(ctx context.Context, reader io.Reader, metadata *
 			// Get memory stats for debugging
 			var memStats runtime.MemStats
 			runtime.ReadMemStats(&memStats)
-			
+
 			log.Printf("[PDF-EXTRACT] 💥 Panic recovered: %v", r)
-			log.Printf("[PDF-EXTRACT] 📊 Memory at panic: Alloc=%dMB, Sys=%dMB, GC=%d", 
+			log.Printf("[PDF-EXTRACT] 📊 Memory at panic: Alloc=%dMB, Sys=%dMB, GC=%d",
 				memStats.Alloc/(1024*1024), memStats.Sys/(1024*1024), memStats.NumGC)
 			log.Printf("[PDF-EXTRACT] 📄 File: %s, Size: %d bytes", metadata.FileName, len(metadata.Properties))
-			
+
 			// Force aggressive garbage collection
 			runtime.GC()
 			runtime.GC() // Double GC for thorough cleanup
-			
+
 			err = NewExtractionError("pdf", fmt.Sprintf("PDF processing panic: %v", r), nil)
 			result = &ExtractionResult{
 				Text:      "",
@@ -49,10 +49,10 @@ func (e *pdfExtractor) Extract(ctx context.Context, reader io.Reader, metadata *
 				PageCount: 0,
 				Language:  "unknown",
 				Metadata: map[string]interface{}{
-					"format":          "pdf",
-					"extraction":      "failed_panic_recovery",
-					"error":           fmt.Sprintf("panic: %v", r),
-					"pages_processed": 0,
+					"format":             "pdf",
+					"extraction":         "failed_panic_recovery",
+					"error":              fmt.Sprintf("panic: %v", r),
+					"pages_processed":    0,
 					"memory_at_panic_mb": memStats.Alloc / (1024 * 1024),
 				},
 			}
@@ -123,29 +123,35 @@ func (e *pdfExtractor) Extract(ctx context.Context, reader io.Reader, metadata *
 		log.Printf("[PDF-EXTRACT] 🧹 Before cleaning: %d chars", len(text))
 		text = e.cleanText(text)
 		log.Printf("[PDF-EXTRACT] 🧹 After cleaning: %d chars", len(text))
-		wordCount := countWords(text)
-		charCount := len(text)
-		language := e.detectLanguage(text)
 
-		log.Printf("[PDF-EXTRACT] 🔍 About to return result: Text=%d chars, WordCount=%d, CharCount=%d",
-			len(text), wordCount, charCount)
+		if e.isGarbageText(text) {
+			log.Printf("[PDF-EXTRACT] ⚠️ Primary extraction produced garbage text, retrying with fallback")
+			err = fmt.Errorf("garbage text detected")
+		} else {
+			wordCount := countWords(text)
+			charCount := len(text)
+			language := e.detectLanguage(text)
 
-		result = &ExtractionResult{
-			Text:      text,
-			WordCount: wordCount,
-			CharCount: charCount,
-			PageCount: pageCount,
-			Language:  language,
-			Metadata: map[string]interface{}{
-				"format":      "pdf",
-				"file_size":   len(content),
-				"extraction":  "ledongthuc/pdf",
-				"pdf_version": e.extractPDFVersion(content),
-			},
+			log.Printf("[PDF-EXTRACT] 🔍 About to return result: Text=%d chars, WordCount=%d, CharCount=%d",
+				len(text), wordCount, charCount)
+
+			result = &ExtractionResult{
+				Text:      text,
+				WordCount: wordCount,
+				CharCount: charCount,
+				PageCount: pageCount,
+				Language:  language,
+				Metadata: map[string]interface{}{
+					"format":      "pdf",
+					"file_size":   len(content),
+					"extraction":  "ledongthuc/pdf",
+					"pdf_version": e.extractPDFVersion(content),
+				},
+			}
+
+			log.Printf("[PDF-EXTRACT] 🔍 Created ExtractionResult: Text field length=%d", len(result.Text))
+			return result, nil
 		}
-
-		log.Printf("[PDF-EXTRACT] 🔍 Created ExtractionResult: Text field length=%d", len(result.Text))
-		return result, nil
 	}
 
 	log.Printf("[PDF-EXTRACT] ⚠️ Primary method failed: err=%v, text_len=%d", err, len(text))
@@ -161,6 +167,23 @@ func (e *pdfExtractor) Extract(ctx context.Context, reader io.Reader, metadata *
 
 	// Clean up the text
 	text = e.cleanText(text)
+	if e.isGarbageText(text) {
+		log.Printf("[PDF-EXTRACT] ⚠️ Fallback extraction detected garbage text, returning empty result")
+		return &ExtractionResult{
+			Text:      "",
+			WordCount: 0,
+			CharCount: 0,
+			PageCount: pageCount,
+			Language:  "unknown",
+			Metadata: map[string]interface{}{
+				"format":       "pdf",
+				"file_size":    len(content),
+				"extraction":   extractionMethod,
+				"garbage_text": true,
+				"pdf_version":  e.extractPDFVersion(content),
+			},
+		}, nil
+	}
 
 	// Count words and characters
 	wordCount := countWords(text)
@@ -436,7 +459,7 @@ func (e *pdfExtractor) extractAllText(ctx context.Context, reader *pdf.Reader, m
 			return allText.String(), pageNum - 1, ctx.Err()
 		default:
 		}
-		
+
 		// Check memory usage before each page to prevent crashes
 		var memStats runtime.MemStats
 		runtime.ReadMemStats(&memStats)
@@ -448,8 +471,8 @@ func (e *pdfExtractor) extractAllText(ctx context.Context, reader *pdf.Reader, m
 			pagesToProcess = pageNum - 1
 			break
 		}
-		
-		log.Printf("[PDF-EXTRACT] 📄 Processing page %d/%d (Memory: %dMB)", 
+
+		log.Printf("[PDF-EXTRACT] 📄 Processing page %d/%d (Memory: %dMB)",
 			pageNum, pagesToProcess, memStats.Alloc/(1024*1024))
 
 		page := reader.Page(pageNum)
@@ -484,7 +507,7 @@ func (e *pdfExtractor) extractAllText(ctx context.Context, reader *pdf.Reader, m
 			allText.WriteString("\n\n")
 		}
 		allText.WriteString(pageText)
-		
+
 		// Force garbage collection every 3 pages to manage memory more aggressively
 		if pageNum%3 == 0 {
 			runtime.GC()
@@ -493,7 +516,7 @@ func (e *pdfExtractor) extractAllText(ctx context.Context, reader *pdf.Reader, m
 	}
 
 	finalText := allText.String()
-	
+
 	// Clear the builder to free memory immediately
 	allText.Reset()
 
@@ -505,7 +528,7 @@ func (e *pdfExtractor) extractAllText(ctx context.Context, reader *pdf.Reader, m
 	} else {
 		log.Printf("[PDF-EXTRACT] 📊 Total extraction result: %d chars from %d pages", len(finalText), pageCount)
 	}
-	
+
 	// Force final GC for large extractions
 	if len(finalText) > 1024*1024 { // > 1MB
 		runtime.GC()
@@ -649,6 +672,38 @@ func (e *pdfExtractor) removePDFArtifacts(text string) string {
 	log.Printf("[PDF-ARTIFACTS] Artifact removal complete: %d lines removed, %d lines kept, result length: %d chars",
 		removedCount, len(cleanedLines), len(result))
 	return result
+}
+
+func (e *pdfExtractor) isGarbageText(text string) bool {
+	if text == "" {
+		return true
+	}
+
+	lower := strings.ToLower(text)
+	markers := []string{"%pdf", "%%eof", "endobj", "startxref", "xref", "obj"}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+
+	printable := 0
+	useful := 0
+	for _, r := range text {
+		if unicode.IsPrint(r) {
+			printable++
+			if unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsSpace(r) {
+				useful++
+			}
+		}
+	}
+
+	if printable == 0 {
+		return true
+	}
+
+	ratio := float64(useful) / float64(printable)
+	return ratio < 0.3
 }
 
 // isNumericLine checks if a line contains only numbers and common separators
