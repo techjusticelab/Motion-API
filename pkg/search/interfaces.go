@@ -15,6 +15,9 @@ type SearchService interface {
 	// IndexDocument indexes a single document
 	IndexDocument(ctx context.Context, doc *models.Document) (string, error)
 
+	// IndexRawDocument indexes a raw JSON payload, optionally using the provided document ID
+	IndexRawDocument(ctx context.Context, docID string, body []byte) (string, error)
+
 	// BulkIndexDocuments indexes multiple documents in a single operation
 	BulkIndexDocuments(ctx context.Context, docs []*models.Document) (*models.BulkResult, error)
 

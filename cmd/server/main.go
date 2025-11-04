@@ -1,14 +1,14 @@
 package main
 
 import (
-    "context"
-    "fmt"
-    "log"
-    "os"
-    "os/signal"
-    "runtime"
-    "syscall"
-    "time"
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"os/signal"
+	"runtime"
+	"syscall"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -18,14 +18,16 @@ import (
 
 	"motion-index-fiber/internal/config"
 	"motion-index-fiber/internal/handlers"
+	"motion-index-fiber/internal/handlers/opensearch"
 	"motion-index-fiber/internal/middleware"
+	"motion-index-fiber/pkg/cloud/digitalocean"
 )
 
 func main() {
-    // Load .env if present (environment-agnostic)
-    if _, statErr := os.Stat(".env"); statErr == nil {
-        _ = godotenv.Load()
-    }
+	// Load .env if present (environment-agnostic)
+	if _, statErr := os.Stat(".env"); statErr == nil {
+		_ = godotenv.Load()
+	}
 
 	// Load configuration
 	cfg, err := config.Load()
@@ -47,15 +49,15 @@ func main() {
 			// Get memory stats for debugging
 			var memStats runtime.MemStats
 			runtime.ReadMemStats(&memStats)
-			
+
 			log.Printf("[PANIC-RECOVERY] 💥 Panic recovered: %v", e)
-			log.Printf("[PANIC-RECOVERY] 📊 Memory at panic: Alloc=%dMB, Sys=%dMB, GC=%d", 
+			log.Printf("[PANIC-RECOVERY] 📊 Memory at panic: Alloc=%dMB, Sys=%dMB, GC=%d",
 				memStats.Alloc/(1024*1024), memStats.Sys/(1024*1024), memStats.NumGC)
 			log.Printf("[PANIC-RECOVERY] 📍 Request: %s %s", c.Method(), c.Path())
-			
+
 			// Force garbage collection after panic
 			runtime.GC()
-			
+
 			// Log stack trace for debugging
 			if cfg.Environment != "production" {
 				log.Printf("[PANIC-RECOVERY] Stack trace: %+v", e)
@@ -65,7 +67,7 @@ func main() {
 	app.Use(logger.New(logger.Config{
 		Format: "[${time}] ${status} - ${method} ${path} - ${latency}\n",
 	}))
-	
+
 	// Memory pressure middleware - reject requests if memory usage is too high
 	app.Use(func(c *fiber.Ctx) error {
 		// Only apply to heavy processing endpoints
@@ -73,13 +75,13 @@ func main() {
 		if path == "/api/v1/categorise" || path == "/api/v1/analyze-redactions" {
 			var memStats runtime.MemStats
 			runtime.ReadMemStats(&memStats)
-			
+
 			// If using more than 800MB, reject new requests
 			const maxMemoryMB = 800
 			currentMemoryMB := memStats.Alloc / (1024 * 1024)
-			
+
 			if currentMemoryMB > maxMemoryMB {
-				log.Printf("[MEMORY-GUARD] 🚫 Rejecting request due to high memory usage: %dMB > %dMB", 
+				log.Printf("[MEMORY-GUARD] 🚫 Rejecting request due to high memory usage: %dMB > %dMB",
 					currentMemoryMB, maxMemoryMB)
 				return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
 					"success": false,
@@ -96,21 +98,21 @@ func main() {
 		}
 		return c.Next()
 	})
-	
+
 	// Temporarily disabled security middleware for embedding issues
 	// TODO: Re-enable with proper configuration for production
 	// app.Use(helmet.New())
-	
+
 	// Completely disable helmet for now to allow unrestricted access
 	// app.Use(helmet.New(helmet.Config{...}))
-	
-    app.Use(cors.New(cors.Config{
-        AllowOrigins:     cfg.Server.AllowedOrigins,
-        AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS,PATCH",
-        AllowHeaders:     "*",
-        AllowCredentials: true,
-        ExposeHeaders:    "Content-Length,Content-Type,X-Total-Count",
-    }))
+
+	app.Use(cors.New(cors.Config{
+		AllowOrigins:     cfg.Server.AllowedOrigins,
+		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS,PATCH",
+		AllowHeaders:     "*",
+		AllowCredentials: true,
+		ExposeHeaders:    "Content-Length,Content-Type,X-Total-Count",
+	}))
 
 	// Initialize handlers
 	h, err := handlers.New(cfg)
@@ -118,27 +120,17 @@ func main() {
 		log.Fatalf("Failed to initialize handlers: %v", err)
 	}
 
-	// Start queue processing
-	queueCtx, queueCancel := context.WithCancel(context.Background())
-	defer queueCancel()
-	
-	if err := h.StartQueueProcessing(queueCtx); err != nil {
-		log.Fatalf("Failed to start queue processing: %v", err)
+	if cfg.DigitalOcean == nil {
+		log.Fatalf("DigitalOcean configuration is required for OpenSearch handler")
 	}
-	log.Println("Queue processing started successfully")
 
-	// Ensure queues are stopped on shutdown
-	defer func() {
-		log.Println("Stopping queue processing...")
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer shutdownCancel()
-		
-		if err := h.StopQueueProcessing(shutdownCtx); err != nil {
-			log.Printf("Error stopping queue processing: %v", err)
-		} else {
-			log.Println("Queue processing stopped successfully")
-		}
-	}()
+	doFactory := digitalocean.NewServiceFactory(cfg.DigitalOcean)
+	opensearchService, err := doFactory.CreateSearchService()
+	if err != nil {
+		log.Fatalf("Failed to create OpenSearch service: %v", err)
+	}
+
+	opensearchHandler := opensearch.NewHandler(opensearchService)
 
 	// Health endpoints
 	app.Get("/", h.Health.Root)
@@ -147,16 +139,20 @@ func main() {
 	// API routes
 	api := app.Group("/api/v1")
 
+	// File upload endpoint
+	api.Post("/upload/s3", h.Storage.UploadDocumentToS3)
+
 	// Public routes
 	api.Post("/categorise", h.Processing.UploadDocument)
 	api.Post("/analyze-redactions", h.Processing.AnalyzeRedactions)
 	api.Post("/redact-document", h.Processing.RedactDocument)
 	api.Post("/search", h.Search.SearchDocuments)
+	api.Post("/os/push", opensearchHandler.PushDocument)
 	api.Get("/legal-tags", h.Search.GetLegalTags)
 	api.Get("/document-types", h.Search.GetDocumentTypes)
 	api.Get("/document-stats", h.Search.GetDocumentStats)
 	api.Get("/field-options", h.Search.GetFieldOptions)
-	api.Get("/all-field-options", h.Search.GetFieldOptions)  // Alias for comprehensive field options
+	api.Get("/all-field-options", h.Search.GetFieldOptions) // Alias for comprehensive field options
 	api.Get("/metadata-fields", h.Search.GetMetadataFields)
 	api.Get("/metadata-fields/:field", h.Search.GetMetadataFieldValues)
 	api.Post("/metadata-field-values", h.Search.PostMetadataFieldValues)
@@ -165,21 +161,21 @@ func main() {
 
 	// File serving routes (separate from document metadata routes)
 	api.Get("/files/search", h.Storage.FindDocumentsByName)
-	
+
 	// Add middleware for file serving to allow embedding
 	api.Get("/files/*", func(c *fiber.Ctx) error {
 		// Remove all restrictions for embedding - TEMPORARY for development
 		// TODO: Add proper security controls for production
-		
+
 		// Allow framing from any origin
 		c.Set("X-Frame-Options", "")
 		c.Response().Header.Del("X-Frame-Options")
-		
+
 		// Remove all restrictive CORS policies
 		c.Response().Header.Del("Cross-Origin-Embedder-Policy")
 		c.Response().Header.Del("Cross-Origin-Resource-Policy")
 		c.Response().Header.Del("Cross-Origin-Opener-Policy")
-		
+
 		// Continue to the actual file serving handler
 		return h.Storage.ServeDocument(c)
 	})
@@ -189,17 +185,10 @@ func main() {
 	storage.Get("/documents", h.Storage.ListDocuments)
 	storage.Get("/documents/count", h.Storage.GetDocumentsCount)
 
-	// Batch processing routes
-	batch := api.Group("/batch")
-	batch.Post("/classify", h.Batch.StartBatchClassification)
-	batch.Get("/:job_id/status", h.Batch.GetBatchJobStatus)
-	batch.Get("/:job_id/results", h.Batch.GetBatchJobResults)
-	batch.Delete("/:job_id", h.Batch.CancelBatchJob)
-
 	// Indexing routes
 	index := api.Group("/index")
 	index.Post("/document", h.Indexing.IndexDocument)
-	
+
 	// TODO: Re-enable authentication for these routes in production
 	// Currently disabled for early development - these should be protected
 	api.Post("/update-metadata", h.Processing.UpdateMetadata)

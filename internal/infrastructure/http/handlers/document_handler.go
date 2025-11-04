@@ -32,9 +32,9 @@ type UpdateMetadataUseCase interface {
 
 // DocumentHandler handles document-related HTTP requests
 type DocumentHandler struct {
-	processUseCase      ProcessDocumentUseCase
-	batchProcessUseCase BatchProcessDocumentUseCase
-	indexUseCase        IndexDocumentUseCase
+	processUseCase        ProcessDocumentUseCase
+	batchProcessUseCase   BatchProcessDocumentUseCase
+	indexUseCase          IndexDocumentUseCase
 	updateMetadataUseCase UpdateMetadataUseCase
 }
 

@@ -43,15 +43,14 @@ Motion-Index Fiber is a high-performance legal document processing API built wit
 ### Package Structure
 - **`cmd/server/`**: Application entry point with graceful shutdown
 - **`cmd/api-classifier/`**: Single-threaded document classification tool
-- **`cmd/api-batch-classifier/`**: Multi-threaded batch classification tool
 - **`cmd/setup-index/`**: OpenSearch index setup and management
 - **`cmd/inspect-index/`**: Index inspection and debugging tools
 - **`pkg/cloud/digitalocean/`**: Direct DigitalOcean API integration and service factory
-- **`pkg/processing/`**: Document processing pipeline (extract, classify, process)
+- **`pkg/processing/`**: Document processing components (extract, classify, process) — batch queues removed
   - **`classifier/`**: Multi-model AI classification (OpenAI, Claude, Ollama)
   - **`extractor/`**: Multi-format text extraction (PDF, DOCX, TXT, OCR)
-  - **`pipeline/`**: Document processing pipeline and workers
-  - **`queue/`**: Priority queue and rate limiting for batch processing
+  - **`pipeline/`**: Document processing pipeline (request-scoped)
+  <!-- Batch queue package removed -->
   - **`redaction/`**: PDF redaction analysis and processing
   - **`migration/`**: Metadata migration utilities
 - **`pkg/search/`**: Search interfaces and OpenSearch client
@@ -60,7 +59,7 @@ Motion-Index Fiber is a high-performance legal document processing API built wit
 - **`internal/handlers/`**: HTTP request handlers
 - **`internal/middleware/`**: Custom middleware (auth, error handling)
 - **`internal/models/`**: Data models and validation
-- **`internal/processing/`**: Internal processing coordinators
+- <!-- `internal/processing/` removed (deprecated batch coordinator) -->
 - **`internal/hardware/`**: Hardware analysis utilities
 - **`internal/testutil/`**: Test utilities following UNIX principles
 - **`pkg/models/`**: Core data models (document, legal, search, time)

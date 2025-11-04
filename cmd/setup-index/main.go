@@ -51,12 +51,12 @@ func main() {
 	// Get the underlying client to check/create index
 	// We need to use reflection or interface assertion to get the client
 	// For now, let's assume we can access the index management functions
-	
+
 	fmt.Printf("📋 Index name: %s\n", cfg.OpenSearch.Index)
 
 	// Create the index with proper mapping
 	fmt.Println("🔧 Creating index with legal document mapping...")
-	
+
 	err = setupDocumentIndex(ctx, searchService, cfg.OpenSearch.Index)
 	if err != nil {
 		log.Fatalf("❌ Failed to setup index: %v", err)
@@ -65,14 +65,14 @@ func main() {
 	fmt.Println("✅ Index setup complete!")
 	fmt.Println("")
 	fmt.Println("🎯 Next steps:")
-	fmt.Println("   - Run: go run cmd/real-batch-processor/main.go test-sample")
-	fmt.Println("   - If successful, run: go run cmd/real-batch-processor/main.go process-real")
+	fmt.Println("   - Start the API server: go run cmd/server/main.go")
+	fmt.Println("   - Use /api/v1/index/document to index documents via API")
 }
 
 // setupDocumentIndex creates the index with the proper legal document mapping
 func setupDocumentIndex(ctx context.Context, searchService interface{}, indexName string) error {
 	// Type assert to get the search service with index management methods
-	service, ok := searchService.(interface{
+	service, ok := searchService.(interface {
 		DeleteIndex(ctx context.Context, name string) error
 		CreateIndex(ctx context.Context, name string, mapping map[string]interface{}) error
 		IndexExists(ctx context.Context, name string) (bool, error)
@@ -87,16 +87,16 @@ func setupDocumentIndex(ctx context.Context, searchService interface{}, indexNam
 
 	// Get the document mapping
 	mapping := models.GetDocumentMapping()
-	
+
 	fmt.Printf("📊 Setting up index '%s' with legal document mapping\n", indexName)
 	fmt.Printf("📋 Mapping contains %d top-level fields\n", len(mapping["mappings"].(map[string]interface{})["properties"].(map[string]interface{})))
-	
+
 	// Check if index exists
 	exists, err := service.IndexExists(ctx, indexName)
 	if err != nil {
 		return fmt.Errorf("failed to check if index exists: %w", err)
 	}
-	
+
 	if exists {
 		fmt.Printf("🗑️  Deleting existing index '%s' to recreate with correct mapping\n", indexName)
 		if err := service.DeleteIndex(ctx, indexName); err != nil {
@@ -104,16 +104,16 @@ func setupDocumentIndex(ctx context.Context, searchService interface{}, indexNam
 		}
 		fmt.Println("   ✅ Existing index deleted")
 	}
-	
+
 	// Create index with proper mapping
 	fmt.Printf("🔧 Creating index '%s' with legal document mapping\n", indexName)
 	if err := service.CreateIndex(ctx, indexName, mapping); err != nil {
 		return fmt.Errorf("failed to create index: %w", err)
 	}
-	
+
 	fmt.Println("   ✅ Index mapping configured for legal documents")
 	fmt.Println("   ✅ Text analysis configured with legal analyzer")
 	fmt.Println("   ✅ Metadata fields configured for legal search")
-	
+
 	return nil
 }

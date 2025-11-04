@@ -43,13 +43,13 @@ func (h *HealthHandler) DetailedStatus(c *fiber.Ctx) error {
 	overallHealthy := storageHealthy && searchHealthy
 
 	status := map[string]interface{}{
-		"service":  "motion-index-fiber",
-		"version":  "1.0.0",
-		"status":   h.statusString(overallHealthy),
-		"uptime":   time.Since(h.startTime).String(),
-		"storage":  h.componentStatus("storage", storageHealthy),
-		"search":   h.componentStatus("search", searchHealthy),
-		"system":   h.systemInfo(),
+		"service": "motion-index-fiber",
+		"version": "1.0.0",
+		"status":  h.statusString(overallHealthy),
+		"uptime":  time.Since(h.startTime).String(),
+		"storage": h.componentStatus("storage", storageHealthy),
+		"search":  h.componentStatus("search", searchHealthy),
+		"system":  h.systemInfo(),
 	}
 
 	if !overallHealthy {
@@ -97,7 +97,7 @@ func (h *HealthHandler) statusString(healthy bool) string {
 }
 
 // componentStatus returns status information for a component
-func (h *HealthHandler) componentStatus(name string, healthy bool) map[string]interface{}{
+func (h *HealthHandler) componentStatus(name string, healthy bool) map[string]interface{} {
 	status := map[string]interface{}{
 		"name":   name,
 		"status": h.statusString(healthy),
@@ -111,7 +111,7 @@ func (h *HealthHandler) componentStatus(name string, healthy bool) map[string]in
 }
 
 // systemInfo returns basic system information
-func (h *HealthHandler) systemInfo() map[string]interface{}{
+func (h *HealthHandler) systemInfo() map[string]interface{} {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 

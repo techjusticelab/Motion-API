@@ -121,10 +121,10 @@ func paginateObjects(objects []*storage.StorageObject, cursor string, limit int)
 	}
 
 	return &dto.ListStorageObjectsResponse{
-		Documents:       documents,
-		NextCursor:      nextCursor,
-		HasMore:         hasMore,
-		TotalReturned:   len(documents),
-		TotalEstimated:  len(objects),
+		Documents:      documents,
+		NextCursor:     nextCursor,
+		HasMore:        hasMore,
+		TotalReturned:  len(documents),
+		TotalEstimated: len(objects),
 	}
 }

@@ -130,34 +130,34 @@ func (opts *ProcessOptions) Validate() error {
 
 // RedactDocumentRequest represents a request to create a redacted version of a document
 type RedactDocumentRequest struct {
-	DocumentID       string                 `json:"document_id,omitempty"`
-	ApplyRedactions  bool                   `json:"apply_redactions"`
-	CustomRedactions []RedactionItem        `json:"custom_redactions,omitempty"`
-	Options          *RedactionOptions      `json:"options,omitempty"`
+	DocumentID       string            `json:"document_id,omitempty"`
+	ApplyRedactions  bool              `json:"apply_redactions"`
+	CustomRedactions []RedactionItem   `json:"custom_redactions,omitempty"`
+	Options          *RedactionOptions `json:"options,omitempty"`
 	// For file upload redaction (alternative to document_id)
-	PDFBase64        string                 `json:"pdf_base64,omitempty"`
+	PDFBase64 string `json:"pdf_base64,omitempty"`
 }
 
 // RedactionOptions configures redaction behavior
 type RedactionOptions struct {
-	UseAI            bool     `json:"use_ai"`
-	CaliforniaLaws   bool     `json:"california_laws"`
-	IncludePatterns  []string `json:"include_patterns,omitempty"`
-	ExcludePatterns  []string `json:"exclude_patterns,omitempty"`
-	ReplacementChar  string   `json:"replacement_char"`
+	UseAI           bool     `json:"use_ai"`
+	CaliforniaLaws  bool     `json:"california_laws"`
+	IncludePatterns []string `json:"include_patterns,omitempty"`
+	ExcludePatterns []string `json:"exclude_patterns,omitempty"`
+	ReplacementChar string   `json:"replacement_char"`
 }
 
 // RedactionItem represents a single redaction to apply
 type RedactionItem struct {
-	ID          string    `json:"id"`
-	Page        int       `json:"page"`
-	Text        string    `json:"text"`
-	BBox        []float64 `json:"bbox"` // [x0, y0, x1, y1]
-	Type        string    `json:"type"`
-	Citation    string    `json:"citation,omitempty"`
-	Reason      string    `json:"reason,omitempty"`
-	LegalCode   string    `json:"legal_code,omitempty"`
-	Applied     bool      `json:"applied"`
+	ID        string    `json:"id"`
+	Page      int       `json:"page"`
+	Text      string    `json:"text"`
+	BBox      []float64 `json:"bbox"` // [x0, y0, x1, y1]
+	Type      string    `json:"type"`
+	Citation  string    `json:"citation,omitempty"`
+	Reason    string    `json:"reason,omitempty"`
+	LegalCode string    `json:"legal_code,omitempty"`
+	Applied   bool      `json:"applied"`
 }
 
 // ApplyDefaults applies default values to process options

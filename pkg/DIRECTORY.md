@@ -9,7 +9,7 @@ pkg/
 ├── api/                 # API utilities and helpers
 ├── cloud/               # Cloud service integrations
 ├── monitoring/          # Monitoring and metrics
-├── processing/          # Document processing pipeline
+├── processing/          # Document processing components (no batch queues)
 ├── search/              # Search functionality
 └── storage/             # Storage interfaces and implementations
 ```
@@ -72,7 +72,7 @@ pkg/
 - `/gpu` - GPU acceleration for processing
 - `/migration` - Data migration utilities
 - `/pipeline` - Processing pipeline coordination
-- `/queue` - Queue management and job processing
+<!-- Queue management for batch processing has been removed -->
 
 **Key Files**:
 - Interface definitions for each processing stage
@@ -84,7 +84,7 @@ pkg/
 - Document text extraction (PDF, DOCX, TXT, RTF)
 - AI-powered document classification
 - OCR processing for scanned documents
-- Processing pipeline orchestration
+- Processing pipeline orchestration (request-scoped)
 - Queue management and job scheduling
 - GPU acceleration where available
 

@@ -90,23 +90,14 @@ func registerRoutes(app *fiber.App, h *handlers.Handlers) {
 // registerProcessingRoutes registers document processing endpoints
 func registerProcessingRoutes(api fiber.Router, h *handlers.Handlers) {
 	// Legacy endpoints (to be migrated)
-	api.Post("/categorise", h.Processing.UploadDocument)
-	api.Post("/analyze-redactions", h.Processing.AnalyzeRedactions)
-	api.Post("/redact-document", h.Processing.RedactDocument)
-	api.Post("/update-metadata", h.Processing.UpdateMetadata)
+	documents := api.Group("/documents")
+	documents.Post("/", h.Processing.ProcessDocumentRefactored)
+	documents.Post("/batch", h.Processing.BatchProcessDocumentsRefactored)
+	documents.Put("/:id/metadata", h.Processing.UpdateMetadataRefactored)
 
-	// TODO: Add new clean handlers when use cases are implemented
-	// documents := api.Group("/documents")
-	// documents.Post("/", documentHandler.ProcessDocument)
-	// documents.Post("/batch", documentHandler.BatchProcessDocuments)
-	// documents.Post("/:id/index", documentHandler.IndexDocument)
-	// documents.Post("/:id/classify", classificationHandler.ClassifyDocument)
-	// documents.Put("/:id/classify", classificationHandler.ReclassifyDocument)
-	// documents.Put("/:id/metadata", documentHandler.UpdateMetadata)
-	//
-	// redactions := api.Group("/redactions")
-	// redactions.Post("/analyze", redactionHandler.AnalyzeRedactions)
-	// redactions.Post("/apply", redactionHandler.ApplyRedactions)
+	redactions := api.Group("/redactions")
+	redactions.Post("/analyze", h.Processing.AnalyzeRedactionsRefactored)
+	redactions.Post("/apply", h.Processing.ApplyRedactionsRefactored)
 }
 
 // registerSearchRoutes registers search and retrieval endpoints
@@ -147,13 +138,7 @@ func registerStorageRoutes(api fiber.Router, h *handlers.Handlers) {
 }
 
 // registerBatchRoutes registers batch processing endpoints
-func registerBatchRoutes(api fiber.Router, h *handlers.Handlers) {
-	batch := api.Group("/batch")
-	batch.Post("/classify", h.Batch.StartBatchClassification)
-	batch.Get("/:job_id/status", h.Batch.GetBatchJobStatus)
-	batch.Get("/:job_id/results", h.Batch.GetBatchJobResults)
-	batch.Delete("/:job_id", h.Batch.CancelBatchJob)
-}
+// Batch routes removed
 
 // registerIndexingRoutes registers document indexing endpoints
 func registerIndexingRoutes(api fiber.Router, h *handlers.Handlers) {
@@ -194,7 +179,7 @@ func memoryPressureMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		// Only check heavy processing endpoints
 		path := c.Path()
-		if path != "/api/v1/categorise" && path != "/api/v1/analyze-redactions" {
+		if path != "/api/v1/documents" && path != "/api/v1/redactions/analyze" {
 			return c.Next()
 		}
 

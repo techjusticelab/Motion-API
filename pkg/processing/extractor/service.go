@@ -46,6 +46,24 @@ func (s *service) registerDefaultExtractors() {
 	for _, format := range docxExtractor.SupportedFormats() {
 		s.extractors[format] = docxExtractor
 	}
+
+	// Register DOC/RTF extractor
+	docExtractor := NewDOCExtractor()
+	for _, format := range docExtractor.SupportedFormats() {
+		s.extractors[format] = docExtractor
+	}
+
+	// Register PPT extractor
+	pptExtractor := NewPPTExtractor()
+	for _, format := range pptExtractor.SupportedFormats() {
+		s.extractors[format] = pptExtractor
+	}
+
+	// Register PPTX extractor
+	pptxExtractor := NewPPTXExtractor()
+	for _, format := range pptxExtractor.SupportedFormats() {
+		s.extractors[format] = pptxExtractor
+	}
 }
 
 // ExtractText extracts text from a document using the appropriate extractor

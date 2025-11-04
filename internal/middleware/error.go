@@ -60,7 +60,7 @@ func ErrorHandler(c *fiber.Ctx, err error) error {
 	if code == fiber.StatusNotFound {
 		response.Message = fmt.Sprintf("Endpoint not found: %s %s", c.Method(), c.Path())
 		response.Suggestions = generateRouteSuggestions(c.Method(), c.Path())
-		
+
 		// Add helpful message about available endpoints
 		if len(response.Suggestions) == 0 {
 			response.Error = "This endpoint does not exist. Check the available routes below for valid API endpoints."
@@ -73,17 +73,17 @@ func ErrorHandler(c *fiber.Ctx, err error) error {
 // generateRouteSuggestions provides helpful route suggestions for 404 errors
 func generateRouteSuggestions(method, path string) []string {
 	var suggestions []string
-	
+
 	// Normalize path for comparison
 	normalizedPath := strings.ToLower(path)
-	
+
 	// Look for similar routes based on path segments
 	for _, route := range availableRoutes {
 		routeParts := strings.Fields(route)
 		if len(routeParts) >= 2 {
 			routeMethod := routeParts[0]
 			routePath := strings.ToLower(routeParts[1])
-			
+
 			// If methods match or method is GET, suggest the route
 			if routeMethod == method || method == "GET" {
 				// Check for partial path matches
@@ -99,7 +99,7 @@ func generateRouteSuggestions(method, path string) []string {
 			}
 		}
 	}
-	
+
 	// If no specific suggestions found, provide common endpoints
 	if len(suggestions) == 0 {
 		suggestions = []string{
@@ -109,6 +109,6 @@ func generateRouteSuggestions(method, path string) []string {
 			"GET /api/v1/document-stats - Get document statistics",
 		}
 	}
-	
+
 	return suggestions
 }

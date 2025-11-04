@@ -151,10 +151,7 @@ PROCESS_TIMEOUT=5m
 - `GET /api/v1/storage/documents/count` - Get document count statistics
 
 ### Batch Processing
-- `POST /api/v1/batch/classify` - Start batch classification job
-- `GET /api/v1/batch/:job_id/status` - Get batch job status
-- `GET /api/v1/batch/:job_id/results` - Get batch job results
-- `DELETE /api/v1/batch/:job_id` - Cancel batch job
+Batch endpoints have been removed to simplify the system. Use single-document processing and indexing endpoints instead.
 
 ### Document Indexing
 - `POST /api/v1/index/document` - Index a document for search
@@ -458,7 +455,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - **Upload Throughput**: 50MB/s for large files (>10MB), 200ms for small files (<1MB)
 - **Text Extraction**: <2 seconds for 50MB PDFs, <500ms for DOCX/TXT files
 - **AI Classification**: <1 second per document (GPT-4 integration)
-- **Batch Processing**: 100 documents/second with concurrent workers
+<!-- Batch processing notes removed -->
 
 ### Search Performance  
 - **Query Response**: <100ms typical, <500ms complex legal queries

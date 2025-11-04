@@ -60,23 +60,23 @@ func (a *Analyzer) Analyze() (*Analysis, error) {
 	if err != nil {
 		return nil, fmt.Errorf("CPU analysis failed: %w", err)
 	}
-	
+
 	memory, err := a.analyzeMemory()
 	if err != nil {
 		return nil, fmt.Errorf("memory analysis failed: %w", err)
 	}
-	
+
 	gpu, err := a.analyzeGPU()
 	if err != nil {
 		// GPU analysis is optional, log but continue
 		gpu = &GPUInfo{Available: false}
 	}
-	
+
 	system, err := a.analyzeSystem()
 	if err != nil {
 		return nil, fmt.Errorf("system analysis failed: %w", err)
 	}
-	
+
 	return &Analysis{
 		CPU:    *cpu,
 		Memory: *memory,
@@ -88,18 +88,18 @@ func (a *Analyzer) Analyze() (*Analysis, error) {
 // analyzeCPU extracts CPU information
 func (a *Analyzer) analyzeCPU() (*CPUInfo, error) {
 	cores := runtime.NumCPU()
-	
+
 	// Read CPU info from /proc/cpuinfo
 	file, err := os.Open("/proc/cpuinfo")
 	if err != nil {
 		return &CPUInfo{Cores: cores}, nil // Fallback with just core count
 	}
 	defer file.Close()
-	
+
 	var model string
 	var speedMHz int
 	var cacheKB int
-	
+
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -126,7 +126,7 @@ func (a *Analyzer) analyzeCPU() (*CPUInfo, error) {
 			}
 		}
 	}
-	
+
 	return &CPUInfo{
 		Cores:    cores,
 		Model:    model,
@@ -142,9 +142,9 @@ func (a *Analyzer) analyzeMemory() (*MemoryInfo, error) {
 		return nil, err
 	}
 	defer file.Close()
-	
+
 	var totalKB, availableKB int64
-	
+
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -164,11 +164,11 @@ func (a *Analyzer) analyzeMemory() (*MemoryInfo, error) {
 			}
 		}
 	}
-	
+
 	totalGB := float64(totalKB) / 1024 / 1024
 	availableGB := float64(availableKB) / 1024 / 1024
 	usedPercent := (totalGB - availableGB) / totalGB * 100
-	
+
 	return &MemoryInfo{
 		TotalGB:     totalGB,
 		AvailableGB: availableGB,
@@ -182,9 +182,9 @@ func (a *Analyzer) analyzeGPU() (*GPUInfo, error) {
 	if info, err := a.analyzeNvidiaGPU(); err == nil {
 		return info, nil
 	}
-	
+
 	// Could add other GPU detection methods here (AMD, Intel)
-	
+
 	return &GPUInfo{Available: false}, nil
 }
 
@@ -194,7 +194,7 @@ func (a *Analyzer) analyzeNvidiaGPU() (*GPUInfo, error) {
 	if _, err := os.Stat("/usr/bin/nvidia-smi"); err != nil {
 		return nil, err
 	}
-	
+
 	// For now, return basic detection
 	// In a full implementation, we would exec nvidia-smi and parse output
 	return &GPUInfo{
@@ -211,21 +211,21 @@ func (a *Analyzer) analyzeSystem() (*SystemInfo, error) {
 		return nil, err
 	}
 	defer file.Close()
-	
+
 	scanner := bufio.NewScanner(file)
 	if !scanner.Scan() {
 		return nil, fmt.Errorf("could not read load average")
 	}
-	
+
 	fields := strings.Fields(scanner.Text())
 	if len(fields) < 3 {
 		return nil, fmt.Errorf("invalid load average format")
 	}
-	
+
 	load1, _ := strconv.ParseFloat(fields[0], 64)
 	load5, _ := strconv.ParseFloat(fields[1], 64)
 	load15, _ := strconv.ParseFloat(fields[2], 64)
-	
+
 	return &SystemInfo{
 		LoadAvg1:  load1,
 		LoadAvg5:  load5,
@@ -237,19 +237,19 @@ func (a *Analyzer) analyzeSystem() (*SystemInfo, error) {
 func (a *Analyzer) GetOptimalWorkerCounts(analysis *Analysis) *WorkerConfig {
 	cores := analysis.CPU.Cores
 	availableGB := analysis.Memory.AvailableGB
-	
+
 	// Conservative calculations for stability
 	downloadWorkers := min(cores*2, 40)
 	extractionWorkers := max(cores-2, 1)
 	classificationWorkers := min(5, cores/4) // API rate limited
 	indexingWorkers := min(cores/3, 10)
-	
+
 	// Adjust based on available memory
 	if availableGB < 8 {
 		downloadWorkers = min(downloadWorkers, 20)
 		extractionWorkers = min(extractionWorkers, 4)
 	}
-	
+
 	return &WorkerConfig{
 		Download:       downloadWorkers,
 		Extraction:     extractionWorkers,

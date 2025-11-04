@@ -86,15 +86,15 @@ type DocumentMetadata = models.DocumentMetadata
 
 // SearchDocumentsResponse represents the response from document search
 type SearchDocumentsResponse struct {
-	Query        string                   `json:"query"`
-	TotalHits    int64                    `json:"total_hits"`
-	MaxScore     float64                  `json:"max_score,omitempty"`
-	SearchTime   int64                    `json:"search_time_ms"`
-	Page         int                      `json:"page"`
-	Size         int                      `json:"size"`
-	Documents    []*models.Document `json:"documents"`
-	Aggregations map[string]interface{}   `json:"aggregations,omitempty"`
-	Suggestions  []string                 `json:"suggestions,omitempty"`
+	Query        string                 `json:"query"`
+	TotalHits    int64                  `json:"total_hits"`
+	MaxScore     float64                `json:"max_score,omitempty"`
+	SearchTime   int64                  `json:"search_time_ms"`
+	Page         int                    `json:"page"`
+	Size         int                    `json:"size"`
+	Documents    []*models.Document     `json:"documents"`
+	Aggregations map[string]interface{} `json:"aggregations,omitempty"`
+	Suggestions  []string               `json:"suggestions,omitempty"`
 }
 
 // DocumentStatsResponse represents document statistics
@@ -246,7 +246,6 @@ type ProcessorStatus struct {
 	LastProcessed     time.Time `json:"last_processed,omitempty"`
 }
 
-
 // HealthResponse represents a basic health check response
 type HealthResponse struct {
 	Status    string    `json:"status"`
@@ -345,19 +344,19 @@ type UpdateMetadataResponse struct {
 
 // RedactDocumentResponse represents the response from creating a redacted document
 type RedactDocumentResponse struct {
-	Success          bool            `json:"success"`
-	DocumentID       string          `json:"document_id,omitempty"`
-	RedactedURL      *string         `json:"redacted_url,omitempty"`
-	PDFBase64        string          `json:"pdf_base64,omitempty"`
-	Filename         string          `json:"filename,omitempty"`
-	Redactions       []RedactionItem `json:"redactions"`
-	TotalRedactions  int             `json:"total_redactions"`
-	Message          string          `json:"message"`
+	Success         bool            `json:"success"`
+	DocumentID      string          `json:"document_id,omitempty"`
+	RedactedURL     *string         `json:"redacted_url,omitempty"`
+	PDFBase64       string          `json:"pdf_base64,omitempty"`
+	Filename        string          `json:"filename,omitempty"`
+	Redactions      []RedactionItem `json:"redactions"`
+	TotalRedactions int             `json:"total_redactions"`
+	Message         string          `json:"message"`
 }
 
 // Re-export helper functions from pkg/models for convenience
 var (
-	NewSuccessResponse          = models.NewSuccessResponse
-	NewErrorResponse            = models.NewErrorResponse
-	NewValidationErrorResponse  = models.NewValidationErrorResponse
+	NewSuccessResponse         = models.NewSuccessResponse
+	NewErrorResponse           = models.NewErrorResponse
+	NewValidationErrorResponse = models.NewValidationErrorResponse
 )

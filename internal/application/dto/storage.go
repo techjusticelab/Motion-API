@@ -34,11 +34,11 @@ func (r *ListStorageObjectsRequest) Validate() error {
 
 // ListStorageObjectsResponse represents the response from listing storage objects.
 type ListStorageObjectsResponse struct {
-	Documents       []StorageObjectDTO `json:"documents"`
-	NextCursor      string             `json:"next_cursor"`
-	HasMore         bool               `json:"has_more"`
-	TotalReturned   int                `json:"total_returned"`
-	TotalEstimated  int                `json:"total_estimated"`
+	Documents      []StorageObjectDTO `json:"documents"`
+	NextCursor     string             `json:"next_cursor"`
+	HasMore        bool               `json:"has_more"`
+	TotalReturned  int                `json:"total_returned"`
+	TotalEstimated int                `json:"total_estimated"`
 }
 
 // StorageObjectDTO represents a storage object in the list response.

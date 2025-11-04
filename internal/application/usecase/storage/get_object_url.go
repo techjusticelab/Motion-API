@@ -65,11 +65,11 @@ func (uc *GetStorageObjectURLUseCase) Execute(ctx context.Context, req *dto.GetS
 	contentType := getContentTypeFromExtension(ext)
 
 	return &dto.GetStorageObjectURLResponse{
-		URL:          documentURL,
-		Path:         documentPath,
-		ContentType:  contentType,
-		IsSignedURL:  req.UseSignedURL,
-		ExpiresIn:    req.Expiration,
+		URL:         documentURL,
+		Path:        documentPath,
+		ContentType: contentType,
+		IsSignedURL: req.UseSignedURL,
+		ExpiresIn:   req.Expiration,
 	}, nil
 }
 

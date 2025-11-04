@@ -22,7 +22,7 @@ func getSystemMemoryInfo() (totalGB float64, availableGB float64, err error) {
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		
+
 		if strings.HasPrefix(line, "MemTotal:") {
 			fields := strings.Fields(line)
 			if len(fields) >= 2 {
@@ -38,7 +38,7 @@ func getSystemMemoryInfo() (totalGB float64, availableGB float64, err error) {
 				}
 			}
 		}
-		
+
 		// Break early if we have both values
 		if memTotal > 0 && memAvailable > 0 {
 			break
@@ -62,12 +62,12 @@ func detectNVIDIAGPU() (hasGPU bool, memoryMB int) {
 	if gpuInfo := detectGPUViaNVIDIASMI(); gpuInfo != nil {
 		return true, gpuInfo.memoryMB
 	}
-	
+
 	// Try alternative detection methods
 	if hasNVIDIADevice() {
 		return true, 0 // GPU present but couldn't determine memory
 	}
-	
+
 	return false, 0
 }
 
@@ -84,27 +84,27 @@ func detectGPUViaNVIDIASMI() *GPUInfo {
 	if err != nil {
 		return nil // nvidia-smi not available or no GPU
 	}
-	
+
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 	if len(lines) == 0 {
 		return nil
 	}
-	
+
 	// Parse first GPU line
 	line := strings.TrimSpace(lines[0])
 	parts := strings.Split(line, ",")
 	if len(parts) < 2 {
 		return nil
 	}
-	
+
 	name := strings.TrimSpace(parts[0])
 	memoryStr := strings.TrimSpace(parts[1])
-	
+
 	memory, err := strconv.Atoi(memoryStr)
 	if err != nil {
 		return nil
 	}
-	
+
 	return &GPUInfo{
 		name:     name,
 		memoryMB: memory,
@@ -117,14 +117,14 @@ func hasNVIDIADevice() bool {
 	if _, err := os.Stat("/proc/driver/nvidia"); err == nil {
 		return true
 	}
-	
+
 	// Check lspci for NVIDIA devices
 	cmd := exec.Command("lspci")
 	output, err := cmd.Output()
 	if err != nil {
 		return false
 	}
-	
+
 	// Look for NVIDIA in the output
 	return strings.Contains(strings.ToLower(string(output)), "nvidia")
 }
@@ -132,23 +132,23 @@ func hasNVIDIADevice() bool {
 // GetDetailedSystemInfo returns comprehensive system information
 func GetDetailedSystemInfo() (*DetailedSystemInfo, error) {
 	info := &DetailedSystemInfo{}
-	
+
 	// Get hardware info
 	hardware, err := DetectHardware()
 	if err != nil {
 		return nil, fmt.Errorf("failed to detect hardware: %w", err)
 	}
 	info.Hardware = hardware
-	
+
 	// Get CPU information
 	info.CPU = getCPUInfo()
-	
+
 	// Get disk space information
 	info.Disk = getDiskSpaceInfo()
-	
+
 	// Get load average
 	info.LoadAverage = getLoadAverage()
-	
+
 	return info, nil
 }
 
@@ -182,7 +182,7 @@ func getCPUInfo() *CPUInfo {
 	info := &CPUInfo{
 		LogicalCores: 0,
 	}
-	
+
 	file, err := os.Open("/proc/cpuinfo")
 	if err != nil {
 		return info
@@ -191,10 +191,10 @@ func getCPUInfo() *CPUInfo {
 
 	scanner := bufio.NewScanner(file)
 	physicalIDs := make(map[string]bool)
-	
+
 	for scanner.Scan() {
 		line := scanner.Text()
-		
+
 		if strings.HasPrefix(line, "processor") {
 			info.LogicalCores++
 		} else if strings.HasPrefix(line, "model name") {
@@ -227,12 +227,12 @@ func getCPUInfo() *CPUInfo {
 			}
 		}
 	}
-	
+
 	info.PhysicalCores = len(physicalIDs)
 	if info.PhysicalCores == 0 {
 		info.PhysicalCores = info.LogicalCores // Fallback
 	}
-	
+
 	return info
 }
 
@@ -243,37 +243,37 @@ func getDiskSpaceInfo() *DiskInfo {
 	if err != nil {
 		return &DiskInfo{}
 	}
-	
+
 	lines := strings.Split(string(output), "\n")
 	if len(lines) < 2 {
 		return &DiskInfo{}
 	}
-	
+
 	// Parse df output (skip header)
 	fields := strings.Fields(lines[1])
 	if len(fields) < 4 {
 		return &DiskInfo{}
 	}
-	
+
 	info := &DiskInfo{}
-	
+
 	// Parse sizes (remove 'G' suffix)
 	if total, err := strconv.ParseFloat(strings.TrimSuffix(fields[1], "G"), 64); err == nil {
 		info.TotalGB = total
 	}
-	
+
 	if used, err := strconv.ParseFloat(strings.TrimSuffix(fields[2], "G"), 64); err == nil {
 		info.UsedGB = used
 	}
-	
+
 	if avail, err := strconv.ParseFloat(strings.TrimSuffix(fields[3], "G"), 64); err == nil {
 		info.AvailableGB = avail
 	}
-	
+
 	if info.TotalGB > 0 {
 		info.UsagePercent = (info.UsedGB / info.TotalGB) * 100
 	}
-	
+
 	return info
 }
 
@@ -289,12 +289,12 @@ func getLoadAverage() []float64 {
 	if !scanner.Scan() {
 		return []float64{0, 0, 0}
 	}
-	
+
 	fields := strings.Fields(scanner.Text())
 	if len(fields) < 3 {
 		return []float64{0, 0, 0}
 	}
-	
+
 	var loads []float64
 	for i := 0; i < 3; i++ {
 		if val, err := strconv.ParseFloat(fields[i], 64); err == nil {
@@ -303,7 +303,7 @@ func getLoadAverage() []float64 {
 			loads = append(loads, 0)
 		}
 	}
-	
+
 	return loads
 }
 
@@ -314,45 +314,45 @@ func CheckNVIDIADriverVersion() string {
 	if err != nil {
 		return ""
 	}
-	
+
 	return strings.TrimSpace(string(output))
 }
 
 // GetGPUUtilization returns current GPU utilization if available
 func GetGPUUtilization() map[string]interface{} {
 	result := make(map[string]interface{})
-	
+
 	cmd := exec.Command("nvidia-smi", "--query-gpu=utilization.gpu,utilization.memory,temperature.gpu", "--format=csv,noheader,nounits")
 	output, err := cmd.Output()
 	if err != nil {
 		result["available"] = false
 		return result
 	}
-	
+
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 	if len(lines) == 0 {
 		result["available"] = false
 		return result
 	}
-	
+
 	// Parse first GPU
 	parts := strings.Split(strings.TrimSpace(lines[0]), ",")
 	if len(parts) >= 3 {
 		result["available"] = true
-		
+
 		if gpuUtil, err := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64); err == nil {
 			result["gpu_utilization_percent"] = gpuUtil
 		}
-		
+
 		if memUtil, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64); err == nil {
 			result["memory_utilization_percent"] = memUtil
 		}
-		
+
 		if temp, err := strconv.ParseFloat(strings.TrimSpace(parts[2]), 64); err == nil {
 			result["temperature_celsius"] = temp
 		}
 	}
-	
+
 	return result
 }
 
@@ -360,38 +360,38 @@ func GetGPUUtilization() map[string]interface{} {
 func EstimateOptimalConcurrency(hardware *HardwareInfo) map[string]int {
 	cores := hardware.CPUCores
 	memGB := int(hardware.MemoryAvailableGB)
-	
+
 	recommendations := make(map[string]int)
-	
+
 	// CPU-bound tasks (text extraction, processing)
 	recommendations["cpu_bound"] = cores - 1
 	if recommendations["cpu_bound"] < 1 {
 		recommendations["cpu_bound"] = 1
 	}
-	
+
 	// I/O-bound tasks (downloads, uploads)
 	recommendations["io_bound"] = cores * 2
 	if recommendations["io_bound"] > 50 {
 		recommendations["io_bound"] = 50
 	}
-	
+
 	// Memory-bound tasks (large document processing)
-	recommendations["memory_bound"] = memGB / 4  // Assume 4GB per task
+	recommendations["memory_bound"] = memGB / 4 // Assume 4GB per task
 	if recommendations["memory_bound"] < 2 {
 		recommendations["memory_bound"] = 2
 	}
 	if recommendations["memory_bound"] > cores {
 		recommendations["memory_bound"] = cores
 	}
-	
+
 	// API rate-limited tasks (OpenAI, external services)
-	recommendations["rate_limited"] = 5  // Conservative for most APIs
-	
+	recommendations["rate_limited"] = 5 // Conservative for most APIs
+
 	// Mixed workload (balanced)
 	recommendations["mixed"] = cores / 2
 	if recommendations["mixed"] < 4 {
 		recommendations["mixed"] = 4
 	}
-	
+
 	return recommendations
 }

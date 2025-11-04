@@ -8,14 +8,14 @@ import (
 
 // DocumentResponse represents a processed document in the HTTP response
 type DocumentResponse struct {
-	ID           string    `json:"id"`
-	Stored       bool      `json:"stored"`
-	StorageURL   string    `json:"storage_url,omitempty"`
-	Classified   bool      `json:"classified"`
-	Indexed      bool      `json:"indexed"`
-	CreatedAt    string    `json:"created_at"`
-	ProcessedAt  string    `json:"processed_at,omitempty"`
-	EventsQueued int       `json:"events_queued,omitempty"`
+	ID           string `json:"id"`
+	Stored       bool   `json:"stored"`
+	StorageURL   string `json:"storage_url,omitempty"`
+	Classified   bool   `json:"classified"`
+	Indexed      bool   `json:"indexed"`
+	CreatedAt    string `json:"created_at"`
+	ProcessedAt  string `json:"processed_at,omitempty"`
+	EventsQueued int    `json:"events_queued,omitempty"`
 }
 
 // BatchDocumentResponse represents a batch processing result in the HTTP response
@@ -35,11 +35,11 @@ type IndexResponse struct {
 
 // MetadataResponse represents updated metadata in the HTTP response
 type MetadataResponse struct {
-	DocumentID   string    `json:"document_id"`
-	Language     string    `json:"language"`
-	LegalTags    []string  `json:"legal_tags"`
-	AIClassified bool      `json:"ai_classified"`
-	ProcessedAt  string    `json:"processed_at,omitempty"`
+	DocumentID   string   `json:"document_id"`
+	Language     string   `json:"language"`
+	LegalTags    []string `json:"legal_tags"`
+	AIClassified bool     `json:"ai_classified"`
+	ProcessedAt  string   `json:"processed_at,omitempty"`
 }
 
 // PresentDocument converts ProcessDocumentResponse DTO to presentation format

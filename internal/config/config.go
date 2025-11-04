@@ -81,13 +81,13 @@ type OpenAIConfig struct {
 type AIConfig struct {
 	// Primary provider (OpenAI)
 	OpenAI OpenAIConfig
-	
+
 	// Fallback provider (Claude)
 	Claude ClaudeConfig
-	
+
 	// Local fallback (Ollama)
 	Ollama OllamaConfig
-	
+
 	// Fallback configuration
 	EnableFallback bool
 	RetryAttempts  int
@@ -193,44 +193,44 @@ func (c *Config) validateStorage() error {
 }
 
 func (c *Config) validateOpenSearch() error {
-    // Always require OpenSearch host (production-like behavior)
-    if c.OpenSearch.Host == "" {
-        return fmt.Errorf("OPENSEARCH_HOST is required")
-    }
+	// Always require OpenSearch host (production-like behavior)
+	if c.OpenSearch.Host == "" {
+		return fmt.Errorf("OPENSEARCH_HOST is required")
+	}
 
 	// Validate port is numeric and within range
 	if c.OpenSearch.Port < 1 || c.OpenSearch.Port > 65535 {
 		return fmt.Errorf("OPENSEARCH_PORT must be between 1 and 65535")
 	}
 
-    // Always require authentication
-    if c.OpenSearch.Username == "" {
-        return fmt.Errorf("OPENSEARCH_USERNAME is required")
-    }
-    if c.OpenSearch.Password == "" {
-        return fmt.Errorf("OPENSEARCH_PASSWORD is required")
-    }
+	// Always require authentication
+	if c.OpenSearch.Username == "" {
+		return fmt.Errorf("OPENSEARCH_USERNAME is required")
+	}
+	if c.OpenSearch.Password == "" {
+		return fmt.Errorf("OPENSEARCH_PASSWORD is required")
+	}
 
 	return nil
 }
 
 func (c *Config) validateAuth() error {
-    // Always require JWT secret and Supabase configuration (production-like)
-    if c.Auth.JWTSecret == "" {
-        return fmt.Errorf("JWT_SECRET is required")
-    }
-    if c.Auth.SupabaseURL == "" {
-        return fmt.Errorf("SUPABASE_URL is required")
-    }
-    if !isValidURL(c.Auth.SupabaseURL) {
-        return fmt.Errorf("SUPABASE_URL must be a valid URL")
-    }
-    if c.Auth.SupabaseAnonKey == "" {
-        return fmt.Errorf("SUPABASE_ANON_KEY is required")
-    }
-    if c.Auth.SupabaseAPIKey == "" {
-        return fmt.Errorf("SUPABASE_API_KEY is required")
-    }
+	// Always require JWT secret and Supabase configuration (production-like)
+	if c.Auth.JWTSecret == "" {
+		return fmt.Errorf("JWT_SECRET is required")
+	}
+	if c.Auth.SupabaseURL == "" {
+		return fmt.Errorf("SUPABASE_URL is required")
+	}
+	if !isValidURL(c.Auth.SupabaseURL) {
+		return fmt.Errorf("SUPABASE_URL must be a valid URL")
+	}
+	if c.Auth.SupabaseAnonKey == "" {
+		return fmt.Errorf("SUPABASE_ANON_KEY is required")
+	}
+	if c.Auth.SupabaseAPIKey == "" {
+		return fmt.Errorf("SUPABASE_API_KEY is required")
+	}
 
 	return nil
 }

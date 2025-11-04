@@ -13,15 +13,7 @@ go run cmd/server/main.go
 - Handles document upload, processing, and search APIs
 - Production-ready with graceful shutdown and health checks
 
-### `real-batch-processor/`
-**Production batch processor** - Process documents in bulk
-```bash
-go run cmd/real-batch-processor/main.go <mode>
-```
-Modes:
-- `test-sample` - Process a few test documents
-- `process-real` - Process all documents in storage
-- `migrate-urls` - Update document URLs for cloud storage
+<!-- Batch processors have been removed to simplify the repository. -->
 
 ## 🔧 Maintenance Commands
 
@@ -79,9 +71,6 @@ go run cmd/test-integration/main.go all
 # Set up OpenSearch index
 go run cmd/setup-index/main.go
 
-# Process documents in batch
-go run cmd/real-batch-processor/main.go test-sample
-
 # Inspect search index
 go run cmd/inspect-index/main.go
 ```
@@ -91,7 +80,6 @@ go run cmd/inspect-index/main.go
 The following duplicate and debugging commands were removed to reduce clutter:
 
 **Removed Duplicates:**
-- `batch-processor/` → Use `real-batch-processor/`
 - `debug-model-json/` → Use `test-integration/` json mode
 - `debug-opensearch/` → Use `test-integration/` indexing mode
 - `debug-extraction/` → Use `test-integration/` extraction mode
@@ -106,8 +94,7 @@ All functionality is preserved in the consolidated commands.
 ## 💡 Development Tips
 
 1. **Start with integration tests** - Run `test-integration` to verify system components
-2. **Use real-batch-processor for end-to-end testing** - Process actual documents
-3. **Check index health** - Use `inspect-index` to verify OpenSearch state
+2. **Check index health** - Use `inspect-index` to verify OpenSearch state
 4. **Development workflow**:
    ```bash
    # Setup (first time)

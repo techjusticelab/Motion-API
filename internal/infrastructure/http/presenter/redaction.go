@@ -6,10 +6,10 @@ import (
 
 // RedactionAnalysisResponse represents redaction analysis in HTTP response
 type RedactionAnalysisResponse struct {
-	DocumentID string                 `json:"document_id,omitempty"`
-	FileName   string                 `json:"file_name,omitempty"`
+	DocumentID string                  `json:"document_id,omitempty"`
+	FileName   string                  `json:"file_name,omitempty"`
 	Redactions []RedactionItemResponse `json:"redactions"`
-	TotalCount int                    `json:"total_count"`
+	TotalCount int                     `json:"total_count"`
 }
 
 // RedactionItemResponse represents a single redaction item
@@ -27,11 +27,11 @@ type RedactionItemResponse struct {
 
 // RedactionResultResponse represents applied redactions in HTTP response
 type RedactionResultResponse struct {
-	DocumentID      string                 `json:"document_id,omitempty"`
-	FileName        string                 `json:"file_name,omitempty"`
+	DocumentID      string                  `json:"document_id,omitempty"`
+	FileName        string                  `json:"file_name,omitempty"`
 	Redactions      []RedactionItemResponse `json:"redactions"`
-	TotalRedactions int                    `json:"total_redactions"`
-	PDFBase64       string                 `json:"pdf_base64,omitempty"`
+	TotalRedactions int                     `json:"total_redactions"`
+	PDFBase64       string                  `json:"pdf_base64,omitempty"`
 }
 
 // PresentRedactionAnalysis converts AnalyzeRedactionsResponse to presentation format

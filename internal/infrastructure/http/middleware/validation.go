@@ -178,7 +178,8 @@ func ValidateResourceExists(paramName string, validator ResourceValidator) fiber
 // when you want to group validations together.
 //
 // Note: In production, prefer using Fiber's native chaining:
-//   app.Use(middleware1, middleware2, middleware3)
+//
+//	app.Use(middleware1, middleware2, middleware3)
 //
 // This Chain function is mainly useful for readability in route definitions.
 func Chain(handlers ...fiber.Handler) []fiber.Handler {

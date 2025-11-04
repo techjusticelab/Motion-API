@@ -126,8 +126,8 @@ func convertPkgResultToApplicationResult(result *models.SearchResult, page, page
 
 	for i, doc := range result.Documents {
 		hit := ports.SearchHit{
-			ID:       doc.ID,
-			Snippet:  extractSnippet(doc.Highlights),
+			ID:        doc.ID,
+			Snippet:   extractSnippet(doc.Highlights),
 			CreatedAt: extractCreatedAt(doc.Document),
 		}
 

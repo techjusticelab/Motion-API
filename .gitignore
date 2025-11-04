@@ -59,3 +59,7 @@ pids
 tmp/
 temp/
 deployments/.env
+
+# Data directory (exclude all except process-mass-upload)
+data/*
+!data/process-mass-upload/

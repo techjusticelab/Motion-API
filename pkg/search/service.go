@@ -1,6 +1,7 @@
 package search
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,8 +12,8 @@ import (
 
 	"github.com/opensearch-project/opensearch-go/v2/opensearchapi"
 
-	"motion-index-fiber/pkg/search/client"
 	"motion-index-fiber/pkg/models"
+	"motion-index-fiber/pkg/search/client"
 	"motion-index-fiber/pkg/search/query"
 )
 
@@ -149,6 +150,45 @@ func (s *service) IndexDocument(ctx context.Context, doc *models.Document) (stri
 	}
 
 	// Parse response to get document ID
+	var indexResponse struct {
+		ID string `json:"_id"`
+	}
+
+	if err := parseResponse(res, &indexResponse); err != nil {
+		return "", fmt.Errorf("failed to parse index response: %w", err)
+	}
+
+	return indexResponse.ID, nil
+}
+
+// IndexRawDocument indexes a raw JSON payload, optionally using the provided document ID
+func (s *service) IndexRawDocument(ctx context.Context, docID string, body []byte) (string, error) {
+	if len(body) == 0 {
+		return "", fmt.Errorf("document body is empty")
+	}
+
+	indexReq := opensearchapi.IndexRequest{
+		Index: s.client.GetIndex(),
+		Body:  bytes.NewReader(body),
+	}
+
+	if docID != "" {
+		sanitizedID := strings.ReplaceAll(docID, "/", "_")
+		sanitizedID = strings.ReplaceAll(sanitizedID, "\\", "_")
+		indexReq.DocumentID = sanitizedID
+	}
+
+	res, err := indexReq.Do(ctx, s.client.GetClient())
+	if err != nil {
+		return "", fmt.Errorf("index request failed: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.IsError() {
+		bodyBytes, _ := io.ReadAll(res.Body)
+		return "", fmt.Errorf("indexing failed with status: %s, body: %s", res.Status(), string(bodyBytes))
+	}
+
 	var indexResponse struct {
 		ID string `json:"_id"`
 	}
@@ -469,7 +509,7 @@ func (s *service) IndexExists(ctx context.Context, name string) (bool, error) {
 	if name == s.client.GetIndex() {
 		return s.client.IndexExists(ctx)
 	}
-	
+
 	// For other indices, use direct API call
 	req := opensearchapi.IndicesExistsRequest{
 		Index: []string{name},
@@ -479,7 +519,7 @@ func (s *service) IndexExists(ctx context.Context, name string) (bool, error) {
 		return false, fmt.Errorf("index exists check failed: %w", err)
 	}
 	defer res.Body.Close()
-	
+
 	return res.StatusCode == 200, nil
 }
 
@@ -489,28 +529,28 @@ func (s *service) CreateIndex(ctx context.Context, name string, mapping map[stri
 	if name == s.client.GetIndex() {
 		return s.client.CreateIndex(ctx, mapping)
 	}
-	
+
 	// For other indices, use direct API call
 	mappingJSON, err := json.Marshal(mapping)
 	if err != nil {
 		return fmt.Errorf("failed to marshal mapping: %w", err)
 	}
-	
+
 	req := opensearchapi.IndicesCreateRequest{
 		Index: name,
 		Body:  strings.NewReader(string(mappingJSON)),
 	}
-	
+
 	res, err := req.Do(ctx, s.client.GetClient())
 	if err != nil {
 		return fmt.Errorf("create index request failed: %w", err)
 	}
 	defer res.Body.Close()
-	
+
 	if res.IsError() {
 		return fmt.Errorf("create index failed with status: %s", res.Status())
 	}
-	
+
 	return nil
 }
 
@@ -520,21 +560,21 @@ func (s *service) DeleteIndex(ctx context.Context, name string) error {
 	if name == s.client.GetIndex() {
 		return s.client.DeleteIndex(ctx)
 	}
-	
+
 	// For other indices, use direct API call
 	req := opensearchapi.IndicesDeleteRequest{
 		Index: []string{name},
 	}
-	
+
 	res, err := req.Do(ctx, s.client.GetClient())
 	if err != nil {
 		return fmt.Errorf("delete index request failed: %w", err)
 	}
 	defer res.Body.Close()
-	
+
 	if res.IsError() && res.StatusCode != 404 {
 		return fmt.Errorf("delete index failed with status: %s", res.Status())
 	}
-	
+
 	return nil
 }
