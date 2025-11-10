@@ -11,6 +11,11 @@ RUN go mod download
 # Copy the rest of the source
 COPY . .
 
+# Install OCR dependency (Tesseract)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tesseract-ocr \
+ && rm -rf /var/lib/apt/lists/*
+
 # App Platform sets PORT at runtime; expose a default for local runs
 EXPOSE 8080
 

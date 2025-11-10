@@ -3,7 +3,6 @@ package extractor
 import (
 	"context"
 	"log"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -26,8 +25,8 @@ func DefaultPDFPageProcessorConfig() PDFPageProcessorConfig {
 		ChunkSize:        5,
 		ChunkCharLimit:   500 * 1024,
 		TotalCharLimit:   2 * 1024 * 1024,
-		DefaultPageLimit: 20,
-		EnableDebugLog:   true,
+		DefaultPageLimit: 0,
+		EnableDebugLog:   false,
 	}
 }
 
@@ -64,29 +63,40 @@ func NewPDFPageProcessor(textCleaner *PDFTextCleaner, config PDFPageProcessorCon
 }
 
 // ExtractAllText extracts text from the PDF reader respecting limits and context cancellation.
-func (p *PDFPageProcessor) ExtractAllText(ctx context.Context, reader *pdf.Reader, metadata *DocumentMetadata) (string, int, error) {
+func (p *PDFPageProcessor) ExtractAllText(ctx context.Context, reader *pdf.Reader, metadata *DocumentMetadata) (string, int, bool, error) {
 	pageCount := reader.NumPage()
-	maxPages := p.config.DefaultPageLimit
+	maxPages := pageCount
+	pageLimitApplied := false
+	charLimitApplied := false
+	debugLog := p.shouldLogDebug(metadata)
 
 	if metadata != nil && metadata.Properties != nil {
 		if limitStr, exists := metadata.Properties["max_pdf_pages"]; exists {
 			if limit, err := strconv.Atoi(limitStr); err == nil && limit > 0 {
-				maxPages = limit
+				if limit < maxPages {
+					maxPages = limit
+					pageLimitApplied = pageCount > limit
+				}
 			}
 		}
 	}
 
-	pagesToProcess := pageCount
-	limitReached := false
-	if pageCount > maxPages {
-		pagesToProcess = maxPages
-		limitReached = true
+	if !pageLimitApplied && p.config.DefaultPageLimit > 0 && p.config.DefaultPageLimit < maxPages {
+		maxPages = p.config.DefaultPageLimit
+		pageLimitApplied = pageCount > p.config.DefaultPageLimit
 	}
 
-	if p.config.EnableDebugLog {
-		log.Printf("[PDF-EXTRACT] 📖 PDF has %d pages, processing %d pages (limit: %d)", pageCount, pagesToProcess, maxPages)
+	pagesToProcess := pageCount
+	if maxPages < pageCount {
+		pagesToProcess = maxPages
+	}
+
+	limitReached := pageLimitApplied
+
+	if debugLog {
+		log.Printf("[PDF-EXTRACT] 📖 PDF has %d pages, processing %d pages", pageCount, pagesToProcess)
 		if limitReached {
-			log.Printf("[PDF-EXTRACT] ⚠️ Page limit reached: processing only first %d of %d pages", maxPages, pageCount)
+			log.Printf("[PDF-EXTRACT] ⚠️ Page limit reached: processing only first %d of %d pages", pagesToProcess, pageCount)
 		}
 	}
 
@@ -104,23 +114,23 @@ func (p *PDFPageProcessor) ExtractAllText(ctx context.Context, reader *pdf.Reade
 			chunkEnd = pagesToProcess
 		}
 
-		if p.config.EnableDebugLog {
+		if debugLog {
 			log.Printf("[PDF-EXTRACT] 🔄 Processing chunk: pages %d-%d", chunkStart, chunkEnd)
 		}
 
-		chunkText, chunkPageCount, err := p.processPageChunk(ctx, reader, chunkStart, chunkEnd)
+		chunkText, chunkPageCount, err := p.processPageChunk(ctx, reader, chunkStart, chunkEnd, debugLog)
 		if err != nil {
 			if ctx.Err() != nil {
-				return finalText.String(), processedPages, ctx.Err()
+				return finalText.String(), processedPages, limitReached, ctx.Err()
 			}
-			log.Printf("[PDF-EXTRACT] ⚠️ Error processing chunk %d-%d: %v", chunkStart, chunkEnd, err)
+			if debugLog {
+				log.Printf("[PDF-EXTRACT] ⚠️ Error processing chunk %d-%d: %v", chunkStart, chunkEnd, err)
+			}
 			continue
 		}
 
 		if chunkText != "" {
 			cleanedChunk := p.textCleaner.StreamCleanText(chunkText)
-			runtime.GC()
-
 			if cleanedChunk != "" {
 				if finalText.Len() > 0 {
 					finalText.WriteString("\n\n")
@@ -133,10 +143,11 @@ func (p *PDFPageProcessor) ExtractAllText(ctx context.Context, reader *pdf.Reade
 		processedPages += chunkPageCount
 
 		if totalCharCount > p.config.TotalCharLimit {
-			if p.config.EnableDebugLog {
+			if debugLog {
 				log.Printf("[PDF-EXTRACT] ⚠️ Total text limit reached (%d chars), stopping at chunk %d-%d", totalCharCount, chunkStart, chunkEnd)
 			}
 			limitReached = true
+			charLimitApplied = true
 			break
 		}
 
@@ -148,9 +159,20 @@ func (p *PDFPageProcessor) ExtractAllText(ctx context.Context, reader *pdf.Reade
 	}
 
 	result := finalText.String()
-	runtime.GC()
+	if metadata != nil && metadata.Properties != nil {
+		metadata.Properties["pdf_extraction_limited"] = strconv.FormatBool(limitReached)
+		if pageLimitApplied {
+			metadata.Properties["pdf_page_limit"] = strconv.Itoa(pagesToProcess)
+		}
+		metadata.Properties["pdf_pages_processed"] = strconv.Itoa(processedPages)
+		metadata.Properties["pdf_total_pages"] = strconv.Itoa(pageCount)
+		metadata.Properties["pdf_char_limit_hit"] = strconv.FormatBool(charLimitApplied)
+		if charLimitApplied {
+			metadata.Properties["pdf_char_limit"] = strconv.Itoa(p.config.TotalCharLimit)
+		}
+	}
 
-	if p.config.EnableDebugLog {
+	if debugLog {
 		if limitReached {
 			log.Printf("[PDF-EXTRACT] Limited extraction: %d chars from %d pages (skipped %d pages)", len(result), processedPages, pageCount-processedPages)
 		} else {
@@ -158,10 +180,10 @@ func (p *PDFPageProcessor) ExtractAllText(ctx context.Context, reader *pdf.Reade
 		}
 	}
 
-	return result, processedPages, nil
+	return result, processedPages, limitReached, nil
 }
 
-func (p *PDFPageProcessor) processPageChunk(ctx context.Context, reader *pdf.Reader, startPage, endPage int) (string, int, error) {
+func (p *PDFPageProcessor) processPageChunk(ctx context.Context, reader *pdf.Reader, startPage, endPage int, debugLog bool) (string, int, error) {
 	var chunkText strings.Builder
 	chunkText.Grow(128 * 1024)
 	processedPages := 0
@@ -175,7 +197,7 @@ func (p *PDFPageProcessor) processPageChunk(ctx context.Context, reader *pdf.Rea
 
 		page := reader.Page(pageNum)
 		if page.V.IsNull() {
-			if p.config.EnableDebugLog {
+			if debugLog {
 				log.Printf("[PDF-EXTRACT] Page %d is null, skipping", pageNum)
 			}
 			continue
@@ -196,19 +218,23 @@ func (p *PDFPageProcessor) processPageChunk(ctx context.Context, reader *pdf.Rea
 		select {
 		case result := <-resultChan:
 			if result.err != nil {
-				log.Printf("[PDF-EXTRACT] Error extracting text from page %d: %v", pageNum, result.err)
+				if debugLog {
+					log.Printf("[PDF-EXTRACT] Error extracting text from page %d: %v", pageNum, result.err)
+				}
 				continue
 			}
 			pageText = result.text
 		case <-time.After(10 * time.Second):
-			log.Printf("[PDF-EXTRACT] Timeout extracting page %d (10s), skipping", pageNum)
+			if debugLog {
+				log.Printf("[PDF-EXTRACT] Timeout extracting page %d (10s), skipping", pageNum)
+			}
 			continue
 		case <-ctx.Done():
 			return chunkText.String(), processedPages, ctx.Err()
 		}
 
 		if pageText == "" {
-			if p.config.EnableDebugLog {
+			if debugLog {
 				log.Printf("[PDF-EXTRACT] Page %d has no text content", pageNum)
 			}
 			processedPages++
@@ -224,12 +250,23 @@ func (p *PDFPageProcessor) processPageChunk(ctx context.Context, reader *pdf.Rea
 		processedPages++
 
 		if chunkText.Len() > p.config.ChunkCharLimit {
-			log.Printf("[PDF-EXTRACT] ⚠️ Chunk size limit reached at page %d (%d chars), stopping chunk", pageNum, chunkText.Len())
+			if debugLog {
+				log.Printf("[PDF-EXTRACT] ⚠️ Chunk size limit reached at page %d (%d chars), stopping chunk", pageNum, chunkText.Len())
+			}
 			break
 		}
 	}
 
 	return chunkText.String(), processedPages, nil
+}
+
+func (p *PDFPageProcessor) shouldLogDebug(metadata *DocumentMetadata) bool {
+	if metadata != nil && metadata.Properties != nil {
+		if value, exists := metadata.Properties["pdf_debug"]; exists {
+			return strings.EqualFold(value, "true")
+		}
+	}
+	return p.config.EnableDebugLog
 }
 
 func minInt(a, b int) int {

@@ -7,9 +7,9 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"image/png"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -145,14 +145,23 @@ func (e *ocrExtractor) extractFromPDF(ctx context.Context, content []byte) (stri
 		return "", 0, fmt.Errorf("PDF has no pages")
 	}
 
+	maxPages := e.config.MaxPages
+	if maxPages > 0 && maxPages < pageCount {
+		pageCount = maxPages
+	}
+
 	var allText strings.Builder
-	
+	processedPages := 0
+
 	// Process pages (could be done in parallel for better performance)
-	for pageNum := 0; pageNum < pageCount; pageNum++ {
+	for pageNum := 0; pageNum < doc.NumPage(); pageNum++ {
+		if maxPages > 0 && pageNum >= maxPages {
+			break
+		}
 		// Check context cancellation
 		select {
 		case <-ctx.Done():
-			return "", pageCount, ctx.Err()
+			return allText.String(), processedPages, ctx.Err()
 		default:
 		}
 
@@ -177,9 +186,11 @@ func (e *ocrExtractor) extractFromPDF(ctx context.Context, content []byte) (stri
 			}
 			allText.WriteString(pageText)
 		}
+
+		processedPages++
 	}
 
-	return allText.String(), pageCount, nil
+	return allText.String(), processedPages, nil
 }
 
 // extractFromImage performs OCR directly on an image
@@ -293,9 +304,10 @@ func (e *ocrExtractor) saveImageToTemp(img image.Image) (string, error) {
 	defer tempFile.Close()
 
 	// Encode as PNG
-	// Note: We would need to import "image/png" and use png.Encode here
-	// For now, we'll assume the image can be handled by gosseract directly
-	// In a full implementation, we'd convert the image.Image to PNG bytes
+	if err := png.Encode(tempFile, img); err != nil {
+		os.Remove(tempFile.Name())
+		return "", err
+	}
 
 	return tempFile.Name(), nil
 }

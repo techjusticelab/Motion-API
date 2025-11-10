@@ -1,9 +1,9 @@
 package extractor
 
 import (
+	"bytes"
 	"fmt"
 	"log"
-	"runtime"
 	"strings"
 )
 
@@ -19,9 +19,9 @@ type PDFFallbackExtractorConfig struct {
 // DefaultPDFFallbackExtractorConfig returns default fallback configuration.
 func DefaultPDFFallbackExtractorConfig() PDFFallbackExtractorConfig {
 	return PDFFallbackExtractorConfig{
-		MaxContentSize:    5 * 1024 * 1024,
-		MaxExtractedChars: 500 * 1024,
-		MaxBytesToScan:    2 * 1024 * 1024,
+		MaxContentSize:    25 * 1024 * 1024,
+		MaxExtractedChars: 1024 * 1024,
+		MaxBytesToScan:    5 * 1024 * 1024,
 		MaxLinesToScan:    10000,
 		EnableDebugLog:    true,
 	}
@@ -56,14 +56,16 @@ func NewPDFFallbackExtractor(streamProcessor *PDFStreamProcessor, textCleaner *P
 }
 
 // Extract executes the configured fallback strategies.
-func (f *PDFFallbackExtractor) Extract(content []byte) (string, int, string, error) {
+func (f *PDFFallbackExtractor) Extract(content []byte) (string, int, string, bool, error) {
 	if len(content) > f.config.MaxContentSize {
-		return "", 0, "", fmt.Errorf("content too large for fallback extraction")
+		return "", 0, "", false, fmt.Errorf("content too large for fallback extraction")
 	}
 
 	if f.validator.IsLikelyGarbagePDF(content) {
-		return "", 0, "", fmt.Errorf("early garbage detection failed")
+		return "", 0, "", false, fmt.Errorf("early garbage detection failed")
 	}
+
+	requiresDecompression := f.detectCompressedStreams(content)
 
 	if f.config.EnableDebugLog {
 		log.Printf("[PDF-EXTRACT] Attempting fallback method 1: raw stream extraction")
@@ -71,7 +73,7 @@ func (f *PDFFallbackExtractor) Extract(content []byte) (string, int, string, err
 
 	text, pageCount := f.streamProcessor.ExtractRawTextStreams(content)
 	if text != "" {
-		return text, pageCount, "raw_stream_extraction", nil
+		return text, pageCount, "raw_stream_extraction", requiresDecompression, nil
 	}
 
 	if f.config.EnableDebugLog {
@@ -80,10 +82,10 @@ func (f *PDFFallbackExtractor) Extract(content []byte) (string, int, string, err
 
 	text = f.extractBasicTextPatterns(content)
 	if text != "" {
-		return text, 1, "pattern_extraction", nil
+		return text, 1, "pattern_extraction", requiresDecompression, nil
 	}
 
-	return "", 0, "", fmt.Errorf("all extraction methods failed")
+	return "", 0, "", requiresDecompression, fmt.Errorf("all extraction methods failed")
 }
 
 func (f *PDFFallbackExtractor) extractBasicTextPatterns(content []byte) string {
@@ -151,7 +153,6 @@ func (f *PDFFallbackExtractor) extractBasicTextPatterns(content []byte) string {
 
 	result := text.String()
 	text.Reset()
-	runtime.GC()
 
 	if f.config.EnableDebugLog {
 		log.Printf("[PDF-EXTRACT] 📊 Pattern extraction result: processed %d lines, added %d lines, total %d chars", linesProcessed, addedLines, len(result))
@@ -165,4 +166,29 @@ func truncateString(s string, limit int) string {
 		return s
 	}
 	return s[:limit]
+}
+
+func (f *PDFFallbackExtractor) detectCompressedStreams(content []byte) bool {
+	compressionMarkers := [][]byte{
+		[]byte("/Filter"),
+		[]byte("/FlateDecode"),
+		[]byte("/LZWDecode"),
+		[]byte("/ASCII85Decode"),
+		[]byte("/ASCIIHexDecode"),
+	}
+
+	scanLimit := len(content)
+	if scanLimit > f.config.MaxBytesToScan && f.config.MaxBytesToScan > 0 {
+		scanLimit = f.config.MaxBytesToScan
+	}
+	sample := content[:scanLimit]
+
+	matchCount := 0
+	for _, marker := range compressionMarkers {
+		if bytes.Contains(sample, marker) {
+			matchCount++
+		}
+	}
+
+	return matchCount >= 2
 }

@@ -25,6 +25,21 @@ A high-performance legal document processing API built with Go and Fiber, design
 - **Supabase Account** for authentication
 - **OpenAI API Key** for document classification
 - **Optional**: Docker for containerized deployment
+- **Optional (OCR)**: Tesseract OCR binaries if you plan to enable automatic OCR fallback locally (`apt install tesseract-ocr` or platform equivalent; already installed in the Docker image)
+
+### Evaluating PDF Extraction Locally
+
+Use the CLI harness to compare extractors:
+
+```bash
+# Current extractor
+go run ./cmd/pdf-eval -file path/to/document.pdf -metadata
+
+# Enhanced orchestrator (requires build tags if OCR support compiled in)
+go run -tags "enhanced tesseract" ./cmd/pdf-eval -mode enhanced -file path/to/document.pdf -metadata
+```
+
+The enhanced mode will automatically trigger OCR when the text extractor fails (assuming Tesseract is available).
 
 ### Installation
 

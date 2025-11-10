@@ -16,36 +16,41 @@ func NewPDFValidator() *PDFValidator {
 
 // IsGarbageText determines whether the provided text is likely unusable garbage.
 func (v *PDFValidator) IsGarbageText(text string) bool {
-	if text == "" {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
 		return true
 	}
 
-	if len(text) < 100 {
+	// Accept short payloads – downstream consumers can decide if they need OCR fallback
+	if len([]rune(trimmed)) < 80 {
 		return false
-	}
-
-	lower := strings.ToLower(text)
-	markers := []string{"%pdf-", "%%eof", "endobj\n", "startxref\n", "/flatedecode"}
-	markerCount := 0
-	for _, marker := range markers {
-		if strings.Contains(lower, marker) {
-			markerCount++
-		}
-	}
-
-	if markerCount >= 3 {
-		log.Printf("[PDF-EXTRACT] Garbage detected: found %d control sequences", markerCount)
-		return true
 	}
 
 	printable := 0
 	useful := 0
-	for _, r := range text {
-		if unicode.IsPrint(r) {
+	letters := 0
+	nonASCIIPrintable := 0
+	replacementRunes := 0
+	uniqueRunes := make(map[rune]struct{}, 64)
+
+	for _, r := range trimmed {
+		if unicode.IsPrint(r) || unicode.IsSpace(r) {
 			printable++
+			uniqueRunes[r] = struct{}{}
 			if unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsSpace(r) {
 				useful++
 			}
+			if unicode.IsLetter(r) {
+				letters++
+			}
+			if r > unicode.MaxASCII {
+				nonASCIIPrintable++
+			}
+			if r == unicode.ReplacementChar {
+				replacementRunes++
+			}
+		} else if r > unicode.MaxASCII {
+			nonASCIIPrintable++
 		}
 	}
 
@@ -53,9 +58,53 @@ func (v *PDFValidator) IsGarbageText(text string) bool {
 		return true
 	}
 
-	ratio := float64(useful) / float64(printable)
-	if ratio < 0.1 {
-		log.Printf("[PDF-EXTRACT] Garbage detected: only %.1f%% useful characters", ratio*100)
+	if printable > 0 {
+		replacementRatio := float64(replacementRunes) / float64(printable)
+		if replacementRatio > 0.02 {
+			log.Printf("[PDF-EXTRACT] Garbage detected: %.2f%% replacement characters", replacementRatio*100)
+			return true
+		}
+	}
+
+	usefulRatio := float64(useful) / float64(printable)
+	if usefulRatio < 0.25 {
+		log.Printf("[PDF-EXTRACT] Garbage detected: useful character ratio %.1f%%", usefulRatio*100)
+		return true
+	}
+
+	// Evaluate word quality
+	words := strings.Fields(trimmed)
+	if len(words) <= 5 && len([]rune(trimmed)) > 200 {
+		// Very low word counts for long payloads usually indicate broken extraction
+		return true
+	}
+
+	alphaWords := 0
+	for _, w := range words {
+		if len(w) <= 1 {
+			continue
+		}
+		if strings.IndexFunc(w, unicode.IsLetter) >= 0 {
+			alphaWords++
+		}
+	}
+
+	if len(words) >= 20 {
+		alphaRatio := float64(alphaWords) / float64(len(words))
+		if alphaRatio < 0.2 {
+			log.Printf("[PDF-EXTRACT] Garbage detected: only %.1f%% alphabetic words", alphaRatio*100)
+			return true
+		}
+	}
+
+	// Highly repetitive character sets (e.g. same rune repeated) suggest corruption
+	if len(uniqueRunes) < 5 && len(trimmed) > 200 {
+		return true
+	}
+
+	// Allow mostly non-ASCII text as long as we saw some letters
+	if letters == 0 && nonASCIIPrintable > 0 {
+		// If we have non-ASCII glyphs but no letters, treat as garbage
 		return true
 	}
 

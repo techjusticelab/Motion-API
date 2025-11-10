@@ -8,6 +8,12 @@ import (
 	"unicode"
 )
 
+var (
+	whitespaceRe           = regexp.MustCompile(`\s+`)
+	horizontalWhitespaceRe = regexp.MustCompile(`[ \t\f]+`)
+	newlineCollapseRe      = regexp.MustCompile(`\n{2,}`)
+)
+
 type PDFTextCleaner struct {
 	textCleaner *TextCleaner
 	config      PDFTextCleanerConfig
@@ -53,13 +59,9 @@ func (c *PDFTextCleaner) BasicStreamCleaning(text string) string {
 		return ""
 	}
 
-	text = strings.ReplaceAll(text, "\n", " ")
-	text = strings.ReplaceAll(text, "\r", " ")
-	text = strings.ReplaceAll(text, "\t", " ")
-
-	re := regexp.MustCompile(`\s+`)
-	text = re.ReplaceAllString(text, " ")
-
+	text = normalizePDFEscapes(text)
+	text = collapseWhitespace(text, true)
+	text = filterPrintable(text, false)
 	text = strings.TrimSpace(text)
 	if len(text) < 3 {
 		return ""
@@ -85,22 +87,9 @@ func (c *PDFTextCleaner) CleanExtractedText(text string) string {
 		return ""
 	}
 
-	text = strings.ReplaceAll(text, "\\n", " ")
-	text = strings.ReplaceAll(text, "\\r", " ")
-	text = strings.ReplaceAll(text, "\\t", " ")
-	text = strings.ReplaceAll(text, "\\(", "(")
-	text = strings.ReplaceAll(text, "\\)", ")")
-	text = strings.ReplaceAll(text, "\\\\", "\\")
-
-	var cleaned strings.Builder
-	cleaned.Grow(len(text))
-	for _, r := range text {
-		if unicode.IsPrint(r) || r == ' ' {
-			cleaned.WriteRune(r)
-		}
-	}
-
-	return strings.TrimSpace(cleaned.String())
+	text = normalizePDFEscapes(text)
+	text = filterPrintable(text, false)
+	return strings.TrimSpace(text)
 }
 
 func (c *PDFTextCleaner) BasicPageCleaning(pageText string) string {
@@ -167,35 +156,71 @@ func (c *PDFTextCleaner) streamRemovePDFArtifacts(text string) string {
 }
 
 func (c *PDFTextCleaner) streamFinalCleanup(text string) string {
-	var cleaned strings.Builder
-	cleaned.Grow(len(text))
-
-	for _, r := range text {
-		if unicode.IsPrint(r) || r == '\n' || r == '\t' {
-			cleaned.WriteRune(r)
-		}
-	}
-
-	return strings.TrimSpace(cleaned.String())
+	text = filterPrintable(text, true)
+	return strings.TrimSpace(text)
 }
 
 func (c *PDFTextCleaner) finalTextNormalization(text string) string {
-	re := regexp.MustCompile(`\s+`)
-	text = re.ReplaceAllString(text, " ")
-
-	var cleaned strings.Builder
-	cleaned.Grow(len(text))
-	for _, r := range text {
-		if unicode.IsPrint(r) || r == '\n' || r == '\t' {
-			cleaned.WriteRune(r)
-		}
-	}
-
-	text = cleaned.String()
+	text = collapseWhitespace(text, false)
+	text = filterPrintable(text, true)
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
 	text = regexp.MustCompile(`\n{3,}`).ReplaceAllString(text, "\n\n")
 	return strings.TrimSpace(text)
+}
+
+func normalizePDFEscapes(text string) string {
+	if text == "" {
+		return text
+	}
+
+	replacer := strings.NewReplacer(
+		"\\n", " ",
+		"\\r", " ",
+		"\\t", " ",
+		"\\(", "(",
+		"\\)", ")",
+		"\\\\", "\\",
+	)
+
+	return replacer.Replace(text)
+}
+
+func collapseWhitespace(text string, replaceNewlines bool) string {
+	if text == "" {
+		return text
+	}
+
+	if replaceNewlines {
+		return whitespaceRe.ReplaceAllString(text, " ")
+	}
+
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	text = horizontalWhitespaceRe.ReplaceAllString(text, " ")
+	text = newlineCollapseRe.ReplaceAllString(text, "\n")
+	return text
+}
+
+func filterPrintable(text string, keepNewlines bool) string {
+	if text == "" {
+		return text
+	}
+
+	var builder strings.Builder
+	builder.Grow(len(text))
+
+	for _, r := range text {
+		if unicode.IsPrint(r) || r == ' ' {
+			builder.WriteRune(r)
+			continue
+		}
+		if keepNewlines && (r == '\n' || r == '\t') {
+			builder.WriteRune(r)
+		}
+	}
+
+	return builder.String()
 }
 
 func (c *PDFTextCleaner) removePDFArtifacts(text string) string {

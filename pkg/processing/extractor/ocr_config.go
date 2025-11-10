@@ -5,6 +5,7 @@ package extractor
 
 import (
 	"fmt"
+	"os"
 	"time"
 )
 
@@ -25,6 +26,8 @@ type OCRConfig struct {
 	PreprocessImages   bool // Default: true
 	EnhanceContrast    bool // Default: true
 	CleanupTemp        bool // Default: true
+	TempDir            string
+	MaxPages           int // Default: 0 (no limit)
 	
 	// Advanced settings
 	CustomConfigPath   string // Optional custom Tesseract config
@@ -45,6 +48,8 @@ func DefaultOCRConfig() *OCRConfig {
 		PreprocessImages:   true,
 		EnhanceContrast:    true,
 		CleanupTemp:        true,
+		TempDir:            os.TempDir(),
+		MaxPages:           0,
 	}
 }
 
@@ -68,6 +73,14 @@ func (c *OCRConfig) Validate() error {
 	
 	if c.ProcessingTimeout <= 0 {
 		c.ProcessingTimeout = 5 * time.Minute
+	}
+
+	if c.TempDir == "" {
+		c.TempDir = os.TempDir()
+	}
+
+	if c.MaxPages < 0 {
+		c.MaxPages = 0
 	}
 	
 	return nil

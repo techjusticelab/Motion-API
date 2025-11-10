@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/ledongthuc/pdf"
@@ -50,7 +50,16 @@ func (e *pdfExtractor) CanExtract(format string) bool {
 
 // Extract extracts text from PDF files with fallback mechanisms.
 func (e *pdfExtractor) Extract(ctx context.Context, reader io.Reader, metadata *DocumentMetadata) (result *ExtractionResult, err error) {
+	if metadata == nil {
+		metadata = &DocumentMetadata{}
+	}
+
+	if metadata.Properties == nil {
+		metadata.Properties = make(map[string]string)
+	}
+
 	log.Printf("[PDF-EXTRACT] Starting extraction - File: %s", metadata.FileName)
+	debugLog := e.shouldLogDebug(metadata)
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -69,8 +78,6 @@ func (e *pdfExtractor) Extract(ctx context.Context, reader io.Reader, metadata *
 				},
 			}
 		}
-		// Force garbage collection after extraction to release PDF memory
-		runtime.GC()
 	}()
 
 	select {
@@ -84,7 +91,7 @@ func (e *pdfExtractor) Extract(ctx context.Context, reader io.Reader, metadata *
 	if err != nil {
 		return nil, NewExtractionError("pdf", "failed to read PDF file", err)
 	}
-	
+
 	// Store content size before processing
 	contentSize := len(content)
 
@@ -94,7 +101,9 @@ func (e *pdfExtractor) Extract(ctx context.Context, reader io.Reader, metadata *
 	default:
 	}
 
-	log.Printf("[PDF-EXTRACT] 📄 Processing PDF: %s, size: %d bytes", metadata.FileName, len(content))
+	if debugLog {
+		log.Printf("[PDF-EXTRACT] 📄 Processing PDF: %s, size: %d bytes", metadata.FileName, len(content))
+	}
 
 	if len(content) < 4 {
 		log.Printf("[PDF-EXTRACT] ❌ PDF too small: %d bytes", len(content))
@@ -102,7 +111,9 @@ func (e *pdfExtractor) Extract(ctx context.Context, reader io.Reader, metadata *
 	}
 
 	header := string(content[:4])
-	log.Printf("[PDF-EXTRACT] 🔍 PDF header check: %q", header)
+	if debugLog {
+		log.Printf("[PDF-EXTRACT] 🔍 PDF header check: %q", header)
+	}
 	if header != "%PDF" {
 		headerFound := false
 		searchLimit := 1024
@@ -110,12 +121,16 @@ func (e *pdfExtractor) Extract(ctx context.Context, reader io.Reader, metadata *
 			searchLimit = len(content)
 		}
 
-		log.Printf("[PDF-EXTRACT] 🔍 Searching for PDF header in first %d bytes", searchLimit)
+		if debugLog {
+			log.Printf("[PDF-EXTRACT] 🔍 Searching for PDF header in first %d bytes", searchLimit)
+		}
 		for i := 0; i <= searchLimit-4; i++ {
 			if string(content[i:i+4]) == "%PDF" {
 				headerFound = true
 				content = content[i:]
-				log.Printf("[PDF-EXTRACT] ✅ Found PDF header at position %d", i)
+				if debugLog {
+					log.Printf("[PDF-EXTRACT] ✅ Found PDF header at position %d", i)
+				}
 				break
 			}
 		}
@@ -126,30 +141,32 @@ func (e *pdfExtractor) Extract(ctx context.Context, reader io.Reader, metadata *
 		}
 	}
 
-	log.Printf("[PDF-EXTRACT] Attempting primary extraction method")
-	text, pageCount, err := e.extractWithPrimaryMethod(ctx, content, metadata)
+	if debugLog {
+		log.Printf("[PDF-EXTRACT] Attempting primary extraction method")
+	}
+	text, pageCount, limited, err := e.extractWithPrimaryMethod(ctx, content, metadata)
 	if err == nil && text != "" {
-		log.Printf("[PDF-EXTRACT] Primary method successful: %d chars, %d pages", len(text), pageCount)
+		if debugLog {
+			log.Printf("[PDF-EXTRACT] Primary method successful: %d chars, %d pages", len(text), pageCount)
+		}
 		text = e.textCleaner.Clean(text)
-		log.Printf("[PDF-EXTRACT] After cleaning: %d chars", len(text))
-		runtime.GC()
+		if debugLog {
+			log.Printf("[PDF-EXTRACT] After cleaning: %d chars", len(text))
+		}
 
 		if e.validator.IsGarbageText(text) {
 			log.Printf("[PDF-EXTRACT] Primary extraction produced garbage text, retrying with fallback")
 			err = fmt.Errorf("garbage text detected")
 		} else {
+			metadataMap := e.buildResultMetadata(contentSize, "primary", e.extractPDFVersion(content), limited, metadata)
 			return &ExtractionResult{
 				Text:      text,
 				WordCount: CountWords(text),
 				CharCount: len(text),
 				PageCount: pageCount,
 				Language:  e.detectLanguage(text),
-				Metadata: map[string]interface{}{
-					"format":      "pdf",
-					"file_size":   contentSize,
-					"extraction":  "primary",
-					"pdf_version": e.extractPDFVersion(content),
-				},
+				Metadata:  metadataMap,
+				Success:   true,
 			}, nil
 		}
 	}
@@ -158,11 +175,17 @@ func (e *pdfExtractor) Extract(ctx context.Context, reader io.Reader, metadata *
 		log.Printf("[PDF-EXTRACT] Primary method failed: %v", err)
 	}
 
-	log.Printf("[PDF-EXTRACT] Attempting fallback extraction methods")
-	fallbackText, fallbackPageCount, extractionMethod, fallbackErr := e.extractWithFallbackMethods(content)
+	if debugLog {
+		log.Printf("[PDF-EXTRACT] Attempting fallback extraction methods")
+	}
+	fallbackText, fallbackPageCount, extractionMethod, fallbackNeedsDecompression, fallbackErr := e.extractWithFallbackMethods(content)
 	if fallbackErr != nil || fallbackText == "" {
 		log.Printf("[PDF-EXTRACT] ❌ Fallback methods failed: %v", fallbackErr)
-		return nil, NewExtractionError("pdf", "pdf extraction failed", err)
+		errMessage := "pdf extraction failed"
+		if fallbackNeedsDecompression {
+			errMessage = errMessage + ": compressed streams detected"
+		}
+		return nil, NewExtractionError("pdf", errMessage, err)
 	}
 
 	fallbackText = e.textCleaner.Clean(fallbackText)
@@ -171,7 +194,16 @@ func (e *pdfExtractor) Extract(ctx context.Context, reader io.Reader, metadata *
 		return nil, NewExtractionError("pdf", "pdf extraction produced garbage text", err)
 	}
 
-	runtime.GC()
+	extractionLimited := false
+	if metadata != nil && metadata.Properties != nil {
+		extractionLimited = strings.EqualFold(metadata.Properties["pdf_extraction_limited"], "true")
+	}
+
+	if metadata != nil && metadata.Properties != nil {
+		metadata.Properties["pdf_fallback_requires_decompression"] = strconv.FormatBool(fallbackNeedsDecompression)
+	}
+
+	metadataMap := e.buildResultMetadata(contentSize, extractionMethod, e.extractPDFVersion(content), extractionLimited, metadata)
 
 	result = &ExtractionResult{
 		Text:      fallbackText,
@@ -179,32 +211,35 @@ func (e *pdfExtractor) Extract(ctx context.Context, reader io.Reader, metadata *
 		CharCount: len(fallbackText),
 		PageCount: fallbackPageCount,
 		Language:  e.detectLanguage(fallbackText),
-		Metadata: map[string]interface{}{
-			"format":      "pdf",
-			"file_size":   contentSize,
-			"extraction":  extractionMethod,
-			"pdf_version": e.extractPDFVersion(content),
-		},
+		Metadata:  metadataMap,
+		Success:   true,
 	}
 
-	log.Printf("[PDF-EXTRACT] 🔍 Fallback ExtractionResult: Text field length=%d", len(result.Text))
+	if debugLog {
+		log.Printf("[PDF-EXTRACT] 🔍 Fallback ExtractionResult: Text field length=%d", len(result.Text))
+	}
 	return result, nil
 }
 
-func (e *pdfExtractor) extractWithPrimaryMethod(ctx context.Context, content []byte, metadata *DocumentMetadata) (string, int, error) {
+func (e *pdfExtractor) extractWithPrimaryMethod(ctx context.Context, content []byte, metadata *DocumentMetadata) (string, int, bool, error) {
 	contentReader := bytes.NewReader(content)
-	log.Printf("[PDF-EXTRACT] 🔓 Opening PDF with ledongthuc/pdf library")
+	debugLog := e.shouldLogDebug(metadata)
+	if debugLog {
+		log.Printf("[PDF-EXTRACT] 🔓 Opening PDF with ledongthuc/pdf library")
+	}
 	pdfReader, err := pdf.NewReader(contentReader, int64(len(content)))
 	if err != nil {
 		log.Printf("[PDF-EXTRACT] ❌ Failed to open PDF with ledongthuc/pdf: %v", err)
-		return "", 0, err
+		return "", 0, false, err
 	}
 
-	log.Printf("[PDF-EXTRACT] ✅ PDF opened successfully, extracting text from pages")
+	if debugLog {
+		log.Printf("[PDF-EXTRACT] ✅ PDF opened successfully, extracting text from pages")
+	}
 	return e.pageProcessor.ExtractAllText(ctx, pdfReader, metadata)
 }
 
-func (e *pdfExtractor) extractWithFallbackMethods(content []byte) (string, int, string, error) {
+func (e *pdfExtractor) extractWithFallbackMethods(content []byte) (string, int, string, bool, error) {
 	return e.fallback.Extract(content)
 }
 
@@ -256,6 +291,56 @@ func (e *pdfExtractor) detectLanguage(text string) string {
 	}
 
 	return "unknown"
+}
+
+func (e *pdfExtractor) buildResultMetadata(contentSize int, extractionMethod, pdfVersion string, extractionLimited bool, metadata *DocumentMetadata) map[string]interface{} {
+	result := map[string]interface{}{
+		"format":             "pdf",
+		"file_size":          contentSize,
+		"extraction":         extractionMethod,
+		"pdf_version":        pdfVersion,
+		"extraction_limited": extractionLimited,
+	}
+
+	if metadata != nil && metadata.Properties != nil {
+		if value := metadata.Properties["pdf_pages_processed"]; value != "" {
+			if processed, err := strconv.Atoi(value); err == nil {
+				result["pages_processed"] = processed
+			}
+		}
+		if value := metadata.Properties["pdf_total_pages"]; value != "" {
+			if total, err := strconv.Atoi(value); err == nil {
+				result["total_pages"] = total
+			}
+		}
+		if value := metadata.Properties["pdf_page_limit"]; value != "" {
+			if limit, err := strconv.Atoi(value); err == nil {
+				result["page_limit"] = limit
+			}
+		}
+		if value := metadata.Properties["pdf_char_limit_hit"]; value != "" {
+			result["char_limit_hit"] = strings.EqualFold(value, "true")
+		}
+		if value := metadata.Properties["pdf_char_limit"]; value != "" {
+			if limit, err := strconv.Atoi(value); err == nil {
+				result["char_limit"] = limit
+			}
+		}
+		if value := metadata.Properties["pdf_fallback_requires_decompression"]; value != "" {
+			result["fallback_requires_decompression"] = strings.EqualFold(value, "true")
+		}
+	}
+
+	return result
+}
+
+func (e *pdfExtractor) shouldLogDebug(metadata *DocumentMetadata) bool {
+	if metadata != nil && metadata.Properties != nil {
+		if value, exists := metadata.Properties["pdf_debug"]; exists {
+			return strings.EqualFold(value, "true")
+		}
+	}
+	return false
 }
 
 // CountWords counts whitespace-separated words in the provided text.

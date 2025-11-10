@@ -2,7 +2,14 @@ package extractor
 
 import (
 	"bytes"
+	"compress/flate"
+	"compress/lzw"
+	"compress/zlib"
+	"encoding/ascii85"
+	"encoding/hex"
+	"io"
 	"log"
+	"regexp"
 	"strings"
 	"unicode"
 )
@@ -40,8 +47,9 @@ func NewPDFStreamProcessor(textCleaner *PDFTextCleaner, config StreamProcessorCo
 }
 
 type streamBoundary struct {
-	start int
-	end   int
+	start   int
+	end     int
+	filters []string
 }
 
 func (p *PDFStreamProcessor) ExtractRawTextStreams(content []byte) (string, int) {
@@ -78,6 +86,15 @@ func (p *PDFStreamProcessor) ExtractRawTextStreams(content []byte) (string, int)
 
 		// Extract and process stream content
 		streamData := content[boundary.start:boundary.end]
+		if len(boundary.filters) > 0 {
+			if decoded, ok := p.decodeStreamData(streamData, boundary.filters); ok {
+				streamData = decoded
+				if p.config.EnableDebugLog {
+					log.Printf("[PDF-STREAM] Decoded stream %d with filters %v", i+1, boundary.filters)
+				}
+			}
+		}
+
 		text := p.extractTextFromStreamBytes(streamData)
 
 		if text != "" {
@@ -119,11 +136,12 @@ func (p *PDFStreamProcessor) findPDFStreamBoundaries(content []byte) []streamBou
 	offset := 0
 	for offset < len(content) {
 		// Find next stream start
-		startIdx := bytes.Index(content[offset:], streamStart)
-		if startIdx == -1 {
+		relIdx := bytes.Index(content[offset:], streamStart)
+		if relIdx == -1 {
 			break
 		}
-		startIdx += offset
+		streamKeywordIdx := offset + relIdx
+		startIdx := streamKeywordIdx
 
 		// Move past "stream" keyword
 		startIdx += len(streamStart)
@@ -140,15 +158,170 @@ func (p *PDFStreamProcessor) findPDFStreamBoundaries(content []byte) []streamBou
 		}
 		endIdx += startIdx
 
+		filters := p.extractStreamFilters(content, streamKeywordIdx)
+
 		boundaries = append(boundaries, streamBoundary{
-			start: startIdx,
-			end:   endIdx,
+			start:   startIdx,
+			end:     endIdx,
+			filters: filters,
 		})
 
 		offset = endIdx + len(streamEnd)
 	}
 
 	return boundaries
+}
+
+var (
+	filterEntryRegexp = regexp.MustCompile(`/Filter\s*(\[[^\]]+\]|/[A-Za-z0-9]+)`)
+	filterNameRegexp  = regexp.MustCompile(`/([A-Za-z0-9]+)`)
+)
+
+func (p *PDFStreamProcessor) extractStreamFilters(content []byte, streamTokenIndex int) []string {
+	if streamTokenIndex <= 0 {
+		return nil
+	}
+
+	searchEnd := streamTokenIndex
+	searchStart := searchEnd - 4096
+	if searchStart < 0 {
+		searchStart = 0
+	}
+
+	segment := content[searchStart:searchEnd]
+	lastDictStartRel := bytes.LastIndex(segment, []byte("<<"))
+	if lastDictStartRel == -1 {
+		return nil
+	}
+
+	dict := segment[lastDictStartRel:]
+	if end := bytes.Index(dict, []byte(">>")); end != -1 {
+		dict = dict[:end+2]
+	}
+
+	return parseStreamFilters(dict)
+}
+
+func parseStreamFilters(dict []byte) []string {
+	if len(dict) == 0 {
+		return nil
+	}
+
+	matches := filterEntryRegexp.FindSubmatch(dict)
+	if len(matches) < 2 {
+		return nil
+	}
+
+	entry := string(matches[1])
+	var filters []string
+	if strings.HasPrefix(entry, "[") {
+		names := filterNameRegexp.FindAllString(entry, -1)
+		for _, name := range names {
+			filters = append(filters, strings.TrimPrefix(name, "/"))
+		}
+	} else {
+		filters = append(filters, strings.TrimPrefix(entry, "/"))
+	}
+
+	return filters
+}
+
+func (p *PDFStreamProcessor) decodeStreamData(data []byte, filters []string) ([]byte, bool) {
+	decoded := data
+	changed := false
+
+	for _, filter := range filters {
+		switch strings.TrimSpace(filter) {
+		case "", "None":
+			continue
+		case "FlateDecode":
+			out, err := decodeFlate(decoded)
+			if err != nil {
+				continue
+			}
+			decoded = out
+			changed = true
+		case "ASCII85Decode":
+			out, err := decodeASCII85(decoded)
+			if err != nil {
+				continue
+			}
+			decoded = out
+			changed = true
+		case "ASCIIHexDecode":
+			out, err := decodeASCIIHex(decoded)
+			if err != nil {
+				continue
+			}
+			decoded = out
+			changed = true
+		case "LZWDecode":
+			out, err := decodeLZW(decoded)
+			if err != nil {
+				continue
+			}
+			decoded = out
+			changed = true
+		default:
+			continue
+		}
+	}
+
+	return decoded, changed
+}
+
+func decodeFlate(data []byte) ([]byte, error) {
+	zr, err := zlib.NewReader(bytes.NewReader(data))
+	if err == nil {
+		defer zr.Close()
+		return io.ReadAll(zr)
+	}
+
+	fr := flate.NewReader(bytes.NewReader(data))
+	defer fr.Close()
+	return io.ReadAll(fr)
+}
+
+func decodeASCII85(data []byte) ([]byte, error) {
+	decoder := ascii85.NewDecoder(bytes.NewReader(data))
+	return io.ReadAll(decoder)
+}
+
+func decodeASCIIHex(data []byte) ([]byte, error) {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 {
+		return nil, nil
+	}
+
+	if idx := bytes.IndexByte(trimmed, '>'); idx != -1 {
+		trimmed = trimmed[:idx]
+	}
+
+	buf := make([]byte, 0, len(trimmed)/2)
+	for _, b := range trimmed {
+		switch b {
+		case ' ', '\n', '\r', '\t', '\f', '\v':
+			continue
+		}
+		buf = append(buf, b)
+	}
+
+	if len(buf)%2 == 1 {
+		buf = append(buf, '0')
+	}
+
+	decoded := make([]byte, hex.DecodedLen(len(buf)))
+	n, err := hex.Decode(decoded, buf)
+	if err != nil {
+		return nil, err
+	}
+	return decoded[:n], nil
+}
+
+func decodeLZW(data []byte) ([]byte, error) {
+	reader := lzw.NewReader(bytes.NewReader(data), lzw.LSB, 8)
+	defer reader.Close()
+	return io.ReadAll(reader)
 }
 
 func (p *PDFStreamProcessor) extractTextFromStreamBytes(streamData []byte) string {

@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -23,10 +24,10 @@ type enhancedService struct {
 	dslipakExtractor Extractor
 	ocrExtractor     Extractor
 	docxExtractor    Extractor
-	
+
 	// Document analyzer - single responsibility
 	analyzer *DocumentAnalyzer
-	
+
 	// Configuration
 	config *EnhancedConfig
 }
@@ -34,16 +35,16 @@ type enhancedService struct {
 // EnhancedConfig holds configuration for the enhanced extraction service
 type EnhancedConfig struct {
 	// Extraction preferences
-	EnableOCR                bool    // Default: true
-	EnableDslipakPDF        bool    // Default: true
-	MinTextThreshold        int     // Minimum chars to consider extraction successful
-	OCRConfidenceThreshold  float64 // Minimum OCR confidence
-	
+	EnableOCR              bool    // Default: true
+	EnableDslipakPDF       bool    // Default: true
+	MinTextThreshold       int     // Minimum chars to consider extraction successful
+	OCRConfidenceThreshold float64 // Minimum OCR confidence
+
 	// Performance settings
-	MaxRetries              int           // Default: 3
-	ExtractionTimeout       time.Duration // Default: 5 minutes
-	EnableFallbacks         bool          // Default: true
-	
+	MaxRetries        int           // Default: 3
+	ExtractionTimeout time.Duration // Default: 5 minutes
+	EnableFallbacks   bool          // Default: true
+
 	// OCR settings
 	OCRConfig *OCRConfig
 }
@@ -51,7 +52,7 @@ type EnhancedConfig struct {
 // DefaultEnhancedConfig returns sensible defaults
 func DefaultEnhancedConfig() *EnhancedConfig {
 	return &EnhancedConfig{
-		EnableOCR:               true,
+		EnableOCR:              true,
 		EnableDslipakPDF:       true,
 		MinTextThreshold:       10,
 		OCRConfidenceThreshold: 0.0,
@@ -85,12 +86,12 @@ func (s *enhancedService) initializeExtractors() {
 	s.textExtractor = NewTextExtractor()
 	s.pdfExtractor = NewPDFExtractor() // Original ledongthuc/pdf
 	s.docxExtractor = NewDOCXExtractor()
-	
+
 	// Enhanced extractors
 	if s.config.EnableDslipakPDF {
 		s.dslipakExtractor = NewDslipakPDFExtractor()
 	}
-	
+
 	if s.config.EnableOCR {
 		s.ocrExtractor = NewOCRExtractor(s.config.OCRConfig)
 	}
@@ -99,7 +100,7 @@ func (s *enhancedService) initializeExtractors() {
 // ExtractText implements intelligent extraction with cascading fallbacks
 func (s *enhancedService) ExtractText(ctx context.Context, reader io.Reader, metadata *DocumentMetadata) (*ExtractionResult, error) {
 	startTime := time.Now()
-	
+
 	// Add timeout to context
 	ctx, cancel := context.WithTimeout(ctx, s.config.ExtractionTimeout)
 	defer cancel()
@@ -130,7 +131,7 @@ func (s *enhancedService) ExtractText(ctx context.Context, reader io.Reader, met
 func (s *enhancedService) extractWithIntelligentStrategy(ctx context.Context, content []byte, metadata *DocumentMetadata, analysis *DocumentAnalysis, startTime time.Time) (*ExtractionResult, error) {
 	var result *ExtractionResult
 	var err error
-	
+
 	// Try recommended method first
 	switch analysis.RecommendedMethod {
 	case "text":
@@ -140,14 +141,22 @@ func (s *enhancedService) extractWithIntelligentStrategy(ctx context.Context, co
 	default:
 		result, err = s.tryTextExtraction(ctx, content, metadata, analysis)
 	}
-	
-	// If primary method succeeded with sufficient text, return it
-	if err == nil && result != nil && s.isExtractionSuccessful(result) {
+
+	result, err, handled := s.maybeRunAutoOCR(ctx, content, metadata, result, err, "primary:"+analysis.RecommendedMethod)
+	if handled {
 		result.Duration = time.Since(startTime).Milliseconds()
 		result.Metadata["analysis"] = analysis.GetRecommendedStrategy()
 		return result, nil
 	}
-	
+
+	// If primary method succeeded with sufficient text, return it
+	if err == nil && result != nil && s.isExtractionSuccessful(result) {
+		result.Duration = time.Since(startTime).Milliseconds()
+		result.Metadata = ensureMetadata(result.Metadata)
+		result.Metadata["analysis"] = analysis.GetRecommendedStrategy()
+		return result, nil
+	}
+
 	// Try fallback methods if enabled
 	if s.config.EnableFallbacks {
 		for _, fallbackMethod := range analysis.Fallbacks {
@@ -163,25 +172,42 @@ func (s *enhancedService) extractWithIntelligentStrategy(ctx context.Context, co
 			case "text":
 				result, err = s.tryOriginalPDFExtraction(ctx, content, metadata)
 			}
-			
+
+			result, err, handled = s.maybeRunAutoOCR(ctx, content, metadata, result, err, "fallback:"+fallbackMethod)
+			if handled {
+				result.Duration = time.Since(startTime).Milliseconds()
+				result.Metadata["analysis"] = analysis.GetRecommendedStrategy()
+				result.Metadata["used_fallback"] = fallbackMethod
+				return result, nil
+			}
+
 			// If fallback succeeded, return it
 			if err == nil && result != nil && s.isExtractionSuccessful(result) {
 				result.Duration = time.Since(startTime).Milliseconds()
+				result.Metadata = ensureMetadata(result.Metadata)
 				result.Metadata["analysis"] = analysis.GetRecommendedStrategy()
 				result.Metadata["used_fallback"] = fallbackMethod
 				return result, nil
 			}
 		}
 	}
-	
+
 	// If all methods failed, return the best result we got or an error
 	if result != nil {
-		result.Duration = time.Since(startTime).Milliseconds()
+		result.Metadata = ensureMetadata(result.Metadata)
 		result.Metadata["analysis"] = analysis.GetRecommendedStrategy()
 		result.Metadata["extraction_incomplete"] = true
+		result.Metadata["auto_ocr_candidates"] = true
+		ocrResult, ocrErr, handledOCR := s.maybeRunAutoOCR(ctx, content, metadata, result, err, "final")
+		if handledOCR && ocrErr == nil {
+			ocrResult.Duration = time.Since(startTime).Milliseconds()
+			ocrResult.Metadata["analysis"] = analysis.GetRecommendedStrategy()
+			return ocrResult, nil
+		}
+		result.Duration = time.Since(startTime).Milliseconds()
 		return result, nil
 	}
-	
+
 	return s.createErrorResult(startTime, "all extraction methods failed", err), err
 }
 
@@ -192,13 +218,22 @@ func (s *enhancedService) extractWithSimpleStrategy(ctx context.Context, content
 	if err != nil {
 		return s.createErrorResult(startTime, "no extractor available", err), err
 	}
-	
+
 	result, err := extractor.Extract(ctx, bytes.NewReader(content), metadata)
 	if err != nil {
 		return s.createErrorResult(startTime, "extraction failed", err), err
 	}
-	
+
+	result, err, handled := s.maybeRunAutoOCR(ctx, content, metadata, result, nil, "simple:"+metadata.Format)
+	if handled && err == nil {
+		result.Duration = time.Since(startTime).Milliseconds()
+		result.Metadata = ensureMetadata(result.Metadata)
+		result.Metadata["strategy"] = "simple"
+		return result, nil
+	}
+
 	result.Duration = time.Since(startTime).Milliseconds()
+	result.Metadata = ensureMetadata(result.Metadata)
 	result.Metadata["strategy"] = "simple"
 	return result, nil
 }
@@ -213,17 +248,17 @@ func (s *enhancedService) tryTextExtraction(ctx context.Context, content []byte,
 				return result, nil
 			}
 		}
-		
+
 		// Fallback to original PDF extractor
 		return s.tryOriginalPDFExtraction(ctx, content, metadata)
 	}
-	
+
 	// For other formats, use appropriate extractor
 	extractor, err := s.getExtractorForFormat(metadata.Format)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return extractor.Extract(ctx, bytes.NewReader(content), metadata)
 }
 
@@ -232,7 +267,7 @@ func (s *enhancedService) tryDslipakExtraction(ctx context.Context, content []by
 	if s.dslipakExtractor == nil {
 		return nil, fmt.Errorf("dslipak extractor not available")
 	}
-	
+
 	return s.dslipakExtractor.Extract(ctx, bytes.NewReader(content), metadata)
 }
 
@@ -246,29 +281,143 @@ func (s *enhancedService) tryOCRExtraction(ctx context.Context, content []byte, 
 	if s.ocrExtractor == nil {
 		return nil, fmt.Errorf("OCR extractor not available")
 	}
-	
+
 	return s.ocrExtractor.Extract(ctx, bytes.NewReader(content), metadata)
+}
+
+func (s *enhancedService) maybeRunAutoOCR(ctx context.Context, content []byte, metadata *DocumentMetadata, result *ExtractionResult, err error, source string) (*ExtractionResult, error, bool) {
+	if strings.Contains(source, "ocr") {
+		return result, err, false
+	}
+
+	trigger, reason := s.shouldTriggerAutoOCR(result, err)
+	if !trigger || !s.config.EnableOCR || s.ocrExtractor == nil {
+		return result, err, false
+	}
+
+	if result != nil {
+		result.Metadata = ensureMetadata(result.Metadata)
+		result.Metadata["auto_ocr_candidate"] = true
+		result.Metadata["auto_ocr_reason"] = reason
+		result.Metadata["auto_ocr_source"] = source
+	}
+
+	log.Printf("[ENHANCED] Auto OCR triggered (source=%s, reason=%s)", source, reason)
+
+	ocrResult, ocrErr := s.tryOCRExtraction(ctx, content, metadata)
+	if ocrErr != nil || ocrResult == nil {
+		if result != nil && ocrErr != nil {
+			result.Metadata["auto_ocr_error"] = ocrErr.Error()
+		}
+		return result, err, false
+	}
+
+	ocrResult.Metadata = ensureMetadata(ocrResult.Metadata)
+	ocrResult.Success = true
+	ocrResult.Metadata["auto_ocr_triggered"] = true
+	ocrResult.Metadata["auto_ocr_reason"] = reason
+	ocrResult.Metadata["auto_ocr_source"] = source
+	if result != nil {
+		if method, ok := result.Metadata["extraction"]; ok {
+			ocrResult.Metadata["previous_extraction"] = method
+		}
+	}
+
+	return ocrResult, nil, true
+}
+
+func (s *enhancedService) shouldTriggerAutoOCR(result *ExtractionResult, err error) (bool, string) {
+	if err != nil {
+		return true, "extractor_error"
+	}
+	if result == nil {
+		return true, "nil_result"
+	}
+
+	trimmed := strings.TrimSpace(result.Text)
+	if trimmed == "" {
+		return true, "empty_text"
+	}
+
+	if len(trimmed) < s.config.MinTextThreshold {
+		return true, "below_threshold"
+	}
+
+	if result.Error != "" {
+		return true, "result_error"
+	}
+
+	if metadataBool(result.Metadata, "fallback_requires_decompression") {
+		return true, "compressed_streams"
+	}
+
+	if metadataBool(result.Metadata, "extraction_limited") {
+		return true, "extraction_limited"
+	}
+
+	if metadataBool(result.Metadata, "char_limit_hit") {
+		return true, "char_limit"
+	}
+
+	if metadataBool(result.Metadata, "requires_ocr") {
+		return true, "metadata_requires_ocr"
+	}
+
+	return false, ""
 }
 
 // isExtractionSuccessful determines if an extraction result is considered successful
 func (s *enhancedService) isExtractionSuccessful(result *ExtractionResult) bool {
-	if result == nil || !result.Success {
+	if result == nil {
 		return false
 	}
-	
-	// Check minimum text threshold
-	if len(strings.TrimSpace(result.Text)) < s.config.MinTextThreshold {
+
+	trimmed := strings.TrimSpace(result.Text)
+	if trimmed == "" {
 		return false
 	}
-	
+
+	if len(trimmed) < s.config.MinTextThreshold {
+		return false
+	}
+
+	if metadataBool(result.Metadata, "fallback_requires_decompression") {
+		return false
+	}
+
 	// Additional quality checks could be added here
 	return true
+}
+
+func ensureMetadata(md map[string]interface{}) map[string]interface{} {
+	if md == nil {
+		return map[string]interface{}{}
+	}
+	return md
+}
+
+func metadataBool(md map[string]interface{}, key string) bool {
+	if md == nil {
+		return false
+	}
+	if val, ok := md[key]; ok {
+		switch v := val.(type) {
+		case bool:
+			return v
+		case string:
+			parsed, err := strconv.ParseBool(v)
+			return err == nil && parsed
+		case float64:
+			return v != 0
+		}
+	}
+	return false
 }
 
 // getExtractorForFormat returns the appropriate extractor for a format (original logic)
 func (s *enhancedService) getExtractorForFormat(format string) (Extractor, error) {
 	format = strings.ToLower(format)
-	
+
 	switch format {
 	case "pdf":
 		return s.pdfExtractor, nil
@@ -287,7 +436,7 @@ func (s *enhancedService) createErrorResult(startTime time.Time, message string,
 	if err != nil {
 		errorMsg = fmt.Sprintf("%s: %v", message, err)
 	}
-	
+
 	return &ExtractionResult{
 		Success:  false,
 		Error:    errorMsg,
@@ -306,11 +455,11 @@ func (s *enhancedService) GetExtractor(format string) (Extractor, error) {
 // SupportedFormats returns all supported formats
 func (s *enhancedService) SupportedFormats() []string {
 	formats := []string{"pdf", "txt", "docx"}
-	
+
 	if s.config.EnableOCR && s.ocrExtractor != nil {
 		formats = append(formats, "png", "jpg", "jpeg", "tiff", "bmp", "gif")
 	}
-	
+
 	return formats
 }
 
@@ -344,7 +493,7 @@ func (s *enhancedService) detectFormat(fileName, mimeType string) string {
 		case "application/rtf":
 			return "rtf"
 		}
-		
+
 		// Check for image MIME types if OCR is enabled
 		if s.config.EnableOCR && strings.HasPrefix(mimeType, "image/") {
 			imagePart := strings.TrimPrefix(mimeType, "image/")
@@ -362,22 +511,22 @@ func (s *enhancedService) detectFormat(fileName, mimeType string) string {
 // GetSystemInfo returns information about available extractors and their capabilities
 func (s *enhancedService) GetSystemInfo() map[string]interface{} {
 	info := map[string]interface{}{
-		"service_type":        "enhanced",
-		"supported_formats":   s.SupportedFormats(),
-		"dslipak_enabled":     s.config.EnableDslipakPDF,
-		"ocr_enabled":         s.config.EnableOCR,
-		"fallbacks_enabled":   s.config.EnableFallbacks,
-		"min_text_threshold":  s.config.MinTextThreshold,
-		"extraction_timeout":  s.config.ExtractionTimeout.String(),
+		"service_type":       "enhanced",
+		"supported_formats":  s.SupportedFormats(),
+		"dslipak_enabled":    s.config.EnableDslipakPDF,
+		"ocr_enabled":        s.config.EnableOCR,
+		"fallbacks_enabled":  s.config.EnableFallbacks,
+		"min_text_threshold": s.config.MinTextThreshold,
+		"extraction_timeout": s.config.ExtractionTimeout.String(),
 	}
-	
+
 	// Add OCR info if available
 	if s.config.EnableOCR && s.ocrExtractor != nil {
 		if ocrExt, ok := s.ocrExtractor.(*ocrExtractor); ok {
 			info["ocr_info"] = ocrExt.GetOCRInfo()
 		}
 	}
-	
+
 	return info
 }
 

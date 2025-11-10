@@ -16,17 +16,17 @@ import (
 type DocumentType int
 
 const (
-	DocumentTypeUnknown DocumentType = iota
-	DocumentTypeTextPDF              // PDF with extractable text
-	DocumentTypeScannedPDF           // PDF with images/scanned content
-	DocumentTypeHybridPDF            // PDF with both text and images
-	DocumentTypeImage                // Image file (PNG, JPG, etc.)
+	DocumentTypeUnknown    DocumentType = iota
+	DocumentTypeTextPDF                 // PDF with extractable text
+	DocumentTypeScannedPDF              // PDF with images/scanned content
+	DocumentTypeHybridPDF               // PDF with both text and images
+	DocumentTypeImage                   // Image file (PNG, JPG, etc.)
 )
 
 // DocumentAnalysis contains the analysis results
 type DocumentAnalysis struct {
-	Type                DocumentType
-	HasExtractableText  bool
+	Type               DocumentType
+	HasExtractableText bool
 	HasImages          bool
 	EstimatedPages     int
 	Confidence         float64
@@ -64,11 +64,11 @@ func (a *DocumentAnalyzer) AnalyzeDocument(ctx context.Context, reader io.Reader
 	return &DocumentAnalysis{
 		Type:               DocumentTypeUnknown,
 		HasExtractableText: false,
-		HasImages:         false,
-		EstimatedPages:    1,
-		Confidence:        0.0,
-		RecommendedMethod: "text",
-		Fallbacks:         []string{"ocr"},
+		HasImages:          false,
+		EstimatedPages:     1,
+		Confidence:         0.0,
+		RecommendedMethod:  "text",
+		Fallbacks:          []string{"ocr"},
 	}, nil
 }
 
@@ -136,10 +136,10 @@ func (a *DocumentAnalyzer) isImage(content []byte, metadata *DocumentMetadata) b
 func (a *DocumentAnalyzer) analyzePDF(content []byte, metadata *DocumentMetadata) (*DocumentAnalysis, error) {
 	// Try to open with dslipak/pdf to check for extractable text
 	hasText, pageCount := a.checkPDFTextContent(content)
-	
+
 	// Analyze content structure
 	hasImages := a.checkPDFImageContent(content)
-	
+
 	// Determine document type and recommendations
 	var docType DocumentType
 	var recommended string
@@ -175,11 +175,11 @@ func (a *DocumentAnalyzer) analyzePDF(content []byte, metadata *DocumentMetadata
 	return &DocumentAnalysis{
 		Type:               docType,
 		HasExtractableText: hasText,
-		HasImages:         hasImages,
-		EstimatedPages:    pageCount,
-		Confidence:        confidence,
-		RecommendedMethod: recommended,
-		Fallbacks:         fallbacks,
+		HasImages:          hasImages,
+		EstimatedPages:     pageCount,
+		Confidence:         confidence,
+		RecommendedMethod:  recommended,
+		Fallbacks:          fallbacks,
 	}, nil
 }
 
@@ -188,11 +188,11 @@ func (a *DocumentAnalyzer) analyzeImage(content []byte, metadata *DocumentMetada
 	return &DocumentAnalysis{
 		Type:               DocumentTypeImage,
 		HasExtractableText: false,
-		HasImages:         true,
-		EstimatedPages:    1,
-		Confidence:        0.9,
-		RecommendedMethod: "ocr",
-		Fallbacks:         []string{},
+		HasImages:          true,
+		EstimatedPages:     1,
+		Confidence:         0.9,
+		RecommendedMethod:  "ocr",
+		Fallbacks:          []string{},
 	}, nil
 }
 
@@ -245,27 +245,37 @@ func (a *DocumentAnalyzer) checkPDFTextContent(content []byte) (bool, int) {
 
 // checkPDFImageContent checks if PDF likely contains images
 func (a *DocumentAnalyzer) checkPDFImageContent(content []byte) bool {
-	contentStr := string(content)
-	
-	// Look for image-related keywords in PDF structure
-	imageIndicators := []string{
-		"/Image",
-		"/DCTDecode",
-		"/FlateDecode",
-		"/JPXDecode",
-		"/JBIG2Decode",
-		"/CCITTFaxDecode",
+	if len(content) == 0 {
+		return false
+	}
+
+	// Limit scan to keep bounds tight and avoid allocating large strings
+	scanLimit := len(content)
+	if scanLimit > 2*1024*1024 {
+		scanLimit = 2 * 1024 * 1024
+	}
+
+	sample := content[:scanLimit]
+	imageIndicators := [][]byte{
+		[]byte("/Image"),
+		[]byte("/DCTDecode"),
+		[]byte("/FlateDecode"),
+		[]byte("/JPXDecode"),
+		[]byte("/JBIG2Decode"),
+		[]byte("/CCITTFaxDecode"),
 	}
 
 	indicatorCount := 0
 	for _, indicator := range imageIndicators {
-		if strings.Contains(contentStr, indicator) {
+		if bytes.Contains(sample, indicator) {
 			indicatorCount++
+			if indicatorCount >= 2 {
+				return true
+			}
 		}
 	}
 
-	// If we find multiple image indicators, likely has images
-	return indicatorCount >= 2
+	return false
 }
 
 // GetAnalysisDescription returns a human-readable description of the analysis
@@ -289,9 +299,9 @@ func (a *DocumentAnalysis) GetRecommendedStrategy() map[string]interface{} {
 	return map[string]interface{}{
 		"primary_method":   a.RecommendedMethod,
 		"fallback_methods": a.Fallbacks,
-		"confidence":      a.Confidence,
-		"description":     a.GetDescription(),
-		"estimated_pages": a.EstimatedPages,
-		"requires_ocr":    a.Type == DocumentTypeScannedPDF || a.Type == DocumentTypeImage,
+		"confidence":       a.Confidence,
+		"description":      a.GetDescription(),
+		"estimated_pages":  a.EstimatedPages,
+		"requires_ocr":     a.Type == DocumentTypeScannedPDF || a.Type == DocumentTypeImage,
 	}
 }
